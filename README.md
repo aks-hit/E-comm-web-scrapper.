@@ -165,10 +165,6 @@ All scraped data is saved to `Outputs/products.json` as a JSON array. Each produ
 5. If the CAPTCHA fails or times out, the page is refreshed and retried
 6. If automated solving fails, the next URL triggers a **manual session** where you solve it yourself
 
-## License
-
-This project is licensed under the [GNU Affero General Public License v3.0](LICENSE).
-
 ---
 
 ## 📈 Scaling & Evaluation Notes (Interviewer Reference)
@@ -176,7 +172,7 @@ This project is licensed under the [GNU Affero General Public License v3.0](LICE
 This section directly addresses common scaling requirements and challenges, specifically the goal of scaling this scraper to **10,000 products** from SHEIN US.
 
 ### 🔗 Resources
-- **GitHub Repository**: [Insert Link Here]
+- **GitHub Repository**: [aks-hit/E-comm-web-scrapper](https://github.com/aks-hit/E-comm-web-scrapper)
 - **Sample Output**: See [`Outputs/sample_output.json`](Outputs/sample_output.json) for a sample of the scraped data schema.
 
 ### 🚀 Approach for Scaling to 10,000 Products
