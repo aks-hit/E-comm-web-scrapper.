@@ -335,26 +335,16 @@ def verify_env_variables():
 
 def scrape_product(url, api_keys):
     """
-    Instantiates the appropriate scraper for the given URL and extracts the product data.
+    Instantiates the Shein scraper for the given URL and extracts the product data.
 
     Args:
         url (str): The product URL to scrape.
 
     Returns:
-        dict: The extracted product data dictionary, or None if scraping fails or platform is unsupported.
+        dict: The extracted product data dictionary, or None if scraping fails.
     """
-    platform = detect_platform(url)
-    if not platform:
-        print(f"{BackgroundColors.RED}Unsupported platform. Skipping URL: {url}{Style.RESET_ALL}")
-        return None
-    
-    scraper_classes = {"shein": Shein}
-    scraper_class = scraper_classes.get(platform)
-    if not scraper_class:
-        return None
-        
     try:
-        scraper = scraper_class(url, local_html_path=None, prefix="", output_directory="", api_keys=api_keys)
+        scraper = Shein(url, local_html_path=None, prefix="", output_directory="", api_keys=api_keys)
         product_data = scraper.scrape()
         return product_data
     except Exception as e:
@@ -798,24 +788,21 @@ def finalize_execution(start_time: datetime.datetime, args: argparse.Namespace, 
     if not sorting_only_mode:  # Verify if not in sorting-only mode
         print(f"{BackgroundColors.GREEN}Successfully processed: {BackgroundColors.CYAN}{successful_scrapes}/{total_urls}{BackgroundColors.GREEN} URLs{Style.RESET_ALL}\n")  # Output the number of successful operations
 
-    try:  # Clean up the staging directory if it's empty after processing all URLs
-        if os.path.exists(staging_output_dir) and not os.listdir(staging_output_dir):  # If staging directory exists and is empty
-            force_remove_path(staging_output_dir)  # Remove the empty staging directory using centralized deletion
-            verbose_output(f"{BackgroundColors.GREEN}Removed empty staging directory: {BackgroundColors.CYAN}{staging_output_dir}{Style.RESET_ALL}")  # Output removal of empty staging directory
-    except Exception:  # If an error occurs during cleanup, ignore it
-        pass  # Best effort cleanup, ignore errors
+    try:
+        if os.path.exists(staging_output_dir) and not os.listdir(staging_output_dir):
+            os.rmdir(staging_output_dir)
+            verbose_output(f"{BackgroundColors.GREEN}Removed empty staging directory: {BackgroundColors.CYAN}{staging_output_dir}{Style.RESET_ALL}")
+    except Exception:
+        pass
 
-    finish_time = datetime.datetime.now()  # Get the finish time of the program
+    finish_time = datetime.datetime.now()
+    execution_time = finish_time - start_time
     print(
-        f"{BackgroundColors.GREEN}Execution time: {BackgroundColors.CYAN}{calculate_execution_time(start_time, finish_time)}{Style.RESET_ALL}"
-    )  # Output the start and finish times
+        f"{BackgroundColors.GREEN}Execution time: {BackgroundColors.CYAN}{execution_time}{Style.RESET_ALL}"
+    )
     print(
         f"{BackgroundColors.BOLD}{BackgroundColors.GREEN}Program finished.{Style.RESET_ALL}"
-    )  # Output the end of the program message
-
-    (
-        atexit.register(play_sound) if RUN_FUNCTIONS["Play Sound"] else None
-    )  # Register the play_sound function to be called when the program finishes
+    )
 
 
 def main():
