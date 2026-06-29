@@ -16,20 +16,25 @@ A production-ready web scraper for extracting product information from **Shein**
 
 ## Architecture
 
-```
-run_pipeline.py          # Orchestrator — runs all 3 phases
-├── Phase 1: Discovery   # Playwright navigates category pages, scrolls, extracts product URLs
-├── Phase 2: Cleaning    # Deduplicates and sanitizes URLs
-├── Session Warmup       # Opens first unscraped URL for manual CAPTCHA solving
-└── Phase 3: Scraping    # Calls main.py which uses Shein.py for each URL
-
-main.py                  # Core router — loads URLs, filters already-scraped, orchestrates scraping
-├── Shein.py             # Scraper — browser automation, CAPTCHA solving, HTML parsing
-├── Gemini.py            # AI integration — Vision API for CAPTCHAs, text generation for marketing
-├── Logger.py            # Dual-output logging (terminal + file)
-├── product_utils.py     # Product name normalization for filesystem-safe directories
-├── urls_utils.py        # URL loading, preprocessing, and file I/O utilities
-└── setup_session.py     # Manual browser session for CAPTCHA solving + cookie saving
+```mermaid
+graph TD
+    A[run_pipeline.py<br/>Orchestrator] --> B(Phase 1: Discovery)
+    A --> C(Phase 2: Cleaning)
+    A --> D(Phase 3: Scraping)
+    
+    B -->|Playwright| B1[Navigate & Extract URLs]
+    C -->|Deduplicate| C1[Sanitize URLs]
+    D --> E[main.py<br/>Core Router]
+    
+    E --> F[Shein.py<br/>Scraper Engine]
+    E --> G[Logger.py<br/>Dual Output]
+    E --> H[urls_utils.py<br/>File I/O]
+    
+    F -->|Detect CAPTCHA| I[Gemini.py<br/>AI Vision]
+    F -->|Solve CAPTCHA| J[CDP Mouse Events]
+    F -->|Parse HTML| K[Output JSON]
+    
+    I -.->|Fallback| L[setup_session.py<br/>Manual Solve]
 ```
 
 ## Requirements
@@ -158,12 +163,33 @@ All scraped data is saved to `Outputs/products.json` as a JSON array. Each produ
 
 ## How CAPTCHA Handling Works
 
-1. When the scraper navigates to a product page, it takes a screenshot
-2. The screenshot is sent to **Gemini Vision** to detect CAPTCHAs
-3. If a CAPTCHA is found, Gemini returns the click coordinates
-4. The scraper uses **CDP mouse events** (not Selenium ActionChains) for human-like clicking
-5. If the CAPTCHA fails or times out, the page is refreshed and retried
-6. If automated solving fails, the next URL triggers a **manual session** where you solve it yourself
+```mermaid
+sequenceDiagram
+    participant S as Scraper (Shein.py)
+    participant B as Browser
+    participant G as Gemini Vision AI
+    participant U as User (Manual)
+
+    S->>B: Navigate to Product URL
+    B-->>S: Return Page Source
+    
+    alt CAPTCHA Detected
+        S->>B: Take Screenshot
+        S->>G: Send Screenshot for Analysis
+        G-->>S: Return Click Coordinates
+        S->>B: Execute CDP Mouse Click
+        B-->>S: CAPTCHA Solved?
+        
+        alt Automated Solve Fails (3 Tries)
+            S->>U: Trigger setup_session.py
+            U->>B: Solve CAPTCHA Manually
+            U-->>S: Press ENTER to Continue
+        end
+    end
+    
+    S->>B: Extract Product Data
+    S->>S: Save to products.json
+```
 
 
 
