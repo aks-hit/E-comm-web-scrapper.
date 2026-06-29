@@ -1,0 +1,239 @@
+"""
+================================================================================
+Urls Utils - urls_utils.py
+================================================================================
+Description :
+Small utility module that provides helper functions for preprocessing
+lists of URL strings (for example, lines read from Inputs/urls.txt).
+The primary utilities are:
+- `strip_whitespace_and_filter(urls)`: strip leading/trailing whitespace
+and remove empty entries.
+- `remove_dash_prefixes(urls)`: remove leading "- " or "-- " prefixes
+commonly used to mark or comment-out lines.
+- `sort_urls(urls)`: return an alphabetically sorted copy of the list.
+- `preprocess_urls(urls)`: convenience wrapper that runs the above
+steps in the recommended order.
+Usage:
+from urls_utils import preprocess_urls
+cleaned = preprocess_urls(raw_lines)
+Returns:
+Processed list of URL strings ready for downstream scraping.
+Dependencies:
+- Python standard library: `re`
+Notes:
+- Functions are pure and return new lists instead of mutating inputs.
+- Keep the helpers small and composable so they are easy to test.
+"""
+import re  # Used for regex-based sanitization of product names for directory naming
+import os  # Filesystem utilities for reading/writing input files
+from pathlib import Path  # Path utilities for atomic write operations
+from colorama import Style  # Colorize terminal text output
+
+
+# Macros:
+class BackgroundColors:  # Colors for the terminal
+    CYAN = "\033[96m"  # Cyan
+    GREEN = "\033[92m"  # Green
+    YELLOW = "\033[93m"  # Yellow
+    RED = "\033[91m"  # Red
+    BOLD = "\033[1m"  # Bold
+
+
+# Execution Constants:
+VERBOSE = False  # Set to True to output verbose messages
+
+
+# Functions Definitions:
+
+
+def verbose_output(true_string="", false_string=""):
+    """
+    Outputs a message if the VERBOSE constant is set to True.
+
+    :param true_string: The string to be outputted if the VERBOSE constant is set to True.
+    :param false_string: The string to be outputted if the VERBOSE constant is set to False.
+    :return: None
+    """
+
+    if VERBOSE and true_string != "":  # If VERBOSE is True and a true_string was provided
+        print(true_string)  # Output the true statement string
+    elif false_string != "":  # If a false_string was provided
+        print(false_string)  # Output the false statement string
+
+
+def strip_whitespace_and_filter(input_urls: list[str]) -> list[str]:
+    """
+    Strip leading/trailing whitespace and remove empty strings.
+
+    :param input_urls: List of URL strings to clean.
+    :return: Cleaned list with no empty entries.
+    """
+
+    cleaned: list[str] = []  # Initialize an empty list to hold the cleaned URLs
+    
+    for url in input_urls:  # Iterate over each URL in the input list
+        cleaned_url = url.strip()  # Remove leading and trailing whitespace from the URL
+        if cleaned_url:  # If the resulting string is not empty after stripping
+            cleaned.append(cleaned_url)  # Add the cleaned URL to the list of cleaned URLs
+        
+    return cleaned  # Return the list of cleaned URLs
+
+
+def remove_dash_prefixes(input_urls: list[str]) -> list[str]:
+    """
+    Remove both '- ' or ' - ' and '-- ' or ' -- ' prefixes from the start of lines (before the urls).
+
+    The order matters: remove the longer prefix first so "-- " isn't
+    partially consumed by the shorter prefix removal.
+    
+    :param input_urls: List of URL strings to process.
+    :return: List of URLs with specified prefixes removed.
+    """
+
+    updated: list[str] = []  # Initialize an empty list to hold the updated URLs after prefix removal
+    
+    for url in input_urls:  # Iterate over each URL in the input list
+        if re.match(r"^\s*--\s+", url):  # Verify if line starts with optional whitespace followed by '-- ' prefix
+            updated.append(re.sub(r"^\s*--\s+", "", url))  # Remove '-- ' or ' -- ' prefix (including leading whitespace) and append result
+            continue  # Move to next URL after handling double-dash case
+
+        if re.match(r"^\s*-\s+", url):  # Verify if line starts with optional whitespace followed by '- ' prefix
+            updated.append(re.sub(r"^\s*-\s+", "", url))  # Remove '- ' or ' - ' prefix (including leading whitespace) and append result
+            continue  # Move to next URL after handling single-dash case
+
+        updated.append(url)  # Append URL unchanged if no matching prefix is found
+
+    return updated  # Return the processed list of URLs
+
+
+def normalize_paths_to_unix(input_urls: list[str]) -> list[str]:
+    """
+    Normalize Windows-style paths in URL entries to Unix-style paths.
+
+    Converts backslashes "\" (single or multiple) to forward slashes "/"
+    only in the optional filename/path portion, preserving the URL.
+
+    :param input_urls: List of raw URL lines (URL + optional filename).
+    :return: New list with normalized paths.
+    """
+
+    normalized_urls: list[str] = []  # Initialize list to store normalized URL entries
+
+    for line in input_urls:  # Iterate over each input line
+        parts = line.split(None, 1)  # Split into URL and optional filename/path
+
+        if not parts:  # Safety verification for empty split result
+            continue  # Skip malformed/empty entries
+
+        product_url = parts[0].strip()  # Extract URL portion
+
+        if len(parts) > 1 and parts[1].strip():  # Verify if a filename/path exists
+            path_part = parts[1].strip().replace("\\", "/")  # Normalize backslashes to forward slashes
+            normalized_urls.append(f"{product_url} {path_part}")  # Reconstruct normalized line
+        else:
+            normalized_urls.append(product_url)  # Keep only URL when no path is present
+
+    return normalized_urls  # Return list with normalized paths
+
+
+def sort_urls(input_urls: list[str]) -> list[str]:
+    """
+    Return an alphabetically sorted copy of the list.
+
+    :param input_urls: List of URL strings.
+    :return: New sorted list.
+    """
+    
+    verbose_output(f"{BackgroundColors.GREEN}Sorting {BackgroundColors.CYAN}{len(input_urls)}{BackgroundColors.GREEN} URLs...{Style.RESET_ALL}")  # Log the start of URL sorting
+
+    return sorted(
+        input_urls,
+        key=lambda line: line.split(None, 1)[0].lower() if line.strip() else ""
+    )  # Return a new list sorted by URL without modifying the original list
+
+
+def preprocess_urls(urls: list[str]) -> list[str]:
+    """
+    Preprocesses a list of URLs by stripping whitespace and removing empty entries.
+    Also, it calls four functions. One for stripping whitespace and filtering empty entries, another for removing dash prefixes, another for normalizing paths to Unix-style, and another for sorting the URLs alphabetically.
+
+    :param urls: A list of URL strings to preprocess.
+    :return: A new list of preprocessed URL strings.
+    """
+    
+    verbose_output(f"{BackgroundColors.GREEN}Preprocessing {BackgroundColors.CYAN}{len(urls)}{BackgroundColors.GREEN}URLs...{Style.RESET_ALL}")  # Log the start of URL preprocessing
+
+    cleaned = strip_whitespace_and_filter(urls)  # Remove leading/trailing whitespace and filter out empty strings
+    without_prefixes = remove_dash_prefixes(cleaned)  # Remove any leading "-- " or "- " prefixes from the URLs
+    normalized = normalize_paths_to_unix(without_prefixes)  # Normalize Windows-style paths to Unix-style paths
+    sorted_urls = sort_urls(normalized)  # Sort the URLs in alphabetical order
+    
+    return sorted_urls  # Return the URLs sorted in alphabetical order
+
+
+def load_urls_to_process(input_file) -> list[str] | None:
+    """
+    Load the input file and return a list of non-empty trimmed lines.
+
+    Each returned list item is the raw trimmed line from the file. The
+    caller is responsible for splitting URL and optional local path if
+    needed.
+
+    Args:
+        input_file (str): path to the input file to read.
+
+    Returns:
+        list[str] | None: list of non-empty, trimmed lines from the file, or None if the file is missing.
+    """
+
+    url_list: list[str] = []  # Initialize list to collect URL strings from the input file
+
+    try:  # Attempt to read the input file
+        if os.path.exists(input_file):  # Verify that the input file exists before attempting to read
+            with open(input_file, "r", encoding="utf-8") as fh:  # Open input file for reading with UTF-8 encoding
+                for line in fh:  # Iterate over each line in the input file
+                    line = line.strip()  # Trim leading/trailing whitespace from the line
+                    if not line:  # Skip blank/empty lines
+                        continue  # Continue to next file line when current is empty
+                    url_list.append(line)  # Append the raw line (URL or 'URL local_path') to the list
+        else:
+            print(f"{BackgroundColors.YELLOW}Input file not found: {input_file}{Style.RESET_ALL}")  # Warn when input file is missing
+            return None  # Return None to indicate missing input file
+    except Exception as e:  # Catch and report any IO/OS errors
+        print(f"{BackgroundColors.RED}Error reading input file {input_file}: {e}{Style.RESET_ALL}")  # Report read errors
+
+    return url_list  # Return the collected URL lines as strings
+
+
+def write_urls_to_file(urls_to_write: list, input_file_path: str, recursive: bool = True, sort: bool = True) -> None:
+    """
+    Write URLs to input file, supporting optional local HTML paths.
+
+    :param urls_to_write: List of URLs or tuples (url, local_html_path).
+    :param input_file_path: Path to the input file.
+    :param recursive: Optional; when True also write a "-backup" copy. Defaults to True.
+    :param sort: Optional; when True sorts lines alphabetically (case-insensitive). Defaults to True.
+    :return: None.
+    """
+
+    try:  # Attempt to write URLs to the input file
+        if sort:  # If sorting is enabled, sort the URLs case-insensitively before writing
+            urls_to_write = sorted(urls_to_write, key=lambda x: x[0].lower() if isinstance(x, tuple) else x.lower())  # Sort URLs by URL string (case-insensitive), handling both tuples and plain strings
+        
+        with open(input_file_path, "w", encoding="utf-8") as file:  # Open the file in write mode with UTF-8 encoding
+            for item in urls_to_write:  # Iterate over each item in the URLs list
+                if isinstance(item, tuple):  # Verify if the item is a tuple
+                    url = item[0]  # Extract the URL from the first position of the tuple
+                    local_html_path = item[1] if len(item) > 1 else None  # Extract optional local HTML path if present
+                else:  # Handle case where item is not a tuple
+                    url = item  # Treat the item directly as URL
+                    local_html_path = None  # Set local HTML path as None when not provided
+                if local_html_path:  # Verify if local HTML path exists
+                    file.write(f"{url} {local_html_path}\n")  # Write URL with local HTML path mapping
+                else:  # Handle case where local HTML path is not provided
+                    file.write(f"{url}\n")  # Write only the URL
+        if recursive:  # If recursive flag is True
+            backup_file_path = input_file_path.replace(".txt", "-backup.txt")  # Determine backup file path
+            write_urls_to_file(urls_to_write, backup_file_path, False, True)  # Recursively write to backup file if recursive flag is True
+    except Exception as e:  # Handle any exception during file write
+        print(f"{BackgroundColors.RED}Error writing to file {input_file_path}: {e}{Style.RESET_ALL}")  # Report write errors
