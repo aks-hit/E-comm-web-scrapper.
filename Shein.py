@@ -45,14 +45,9 @@ Assumptions & Notes:
 - Relies on Gemini for CAPTCHA solving.
 - Website structure may change over time; CSS selectors are defined in HTML_SELECTORS.
 """
-import atexit  # For playing a sound when the program finishes
-import datetime  # For getting the current date and time
 import json  # For parsing JSON data from script tags
 import os  # For running a command in the terminal
-import platform  # For getting the operating system name
 import re  # For regular expressions
-import shutil  # For copying local files
-import subprocess  # For running ffmpeg commands
 import sys  # For system-specific parameters and functions
 import time  # For delays during page rendering
 from bs4 import BeautifulSoup  # For parsing HTML content
@@ -63,7 +58,6 @@ from pathlib import Path  # For handling file paths
 from playwright.sync_api import sync_playwright, TimeoutError as PlaywrightTimeoutError  # For browser automation
 from product_utils import normalize_product_name  # Centralized product dir name normalization
 from typing import Optional, List, Tuple  # For type hints
-from urllib.parse import urlparse  # For URL manipulation
 
 # Macros:
 class BackgroundColors:  # Colors for the terminal

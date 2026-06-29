@@ -41,22 +41,16 @@ import datetime  # For getting the current date and time
 import json  # For JSON history file handling
 import os  # For running a command in the terminal
 import platform  # For getting the operating system name
-import re # For regular expressions in text processing
-import shutil  # For removing directories
-import subprocess  # For running system commands
 import sys  # For system-specific parameters and functions
 import time  # For adding delays between requests
 from collections import OrderedDict  # For deterministic ordered mapping of named API keys
 from colorama import Style  # For coloring the terminal
 from dotenv import load_dotenv  # For loading environment variables
-from Gemini import Gemini, PermanentApiFailureError, QuotaExceededError  # Imports for Gemini AI integration and custom exceptions
 from Logger import Logger  # For logging output to both terminal and file
 from pathlib import Path  # For handling file paths
 from Shein import Shein  # Import the Shein class
-from tkinter import Tk, messagebox  # For showing GUI warnings
 from tqdm import tqdm  # Progress bar for URL processing
 from typing import Dict, List, Optional, Tuple  # For type-annotated containers used by final verification functions
-from urllib.parse import urlparse  # For parsing URL hostnames
 from urls_utils import load_urls_to_process, preprocess_urls, write_urls_to_file  # URL helpers
 
 
@@ -327,91 +321,14 @@ def verify_env_variables():
 
 
 
-def split_phrases(text: str) -> list:
-    """
-    Split text into phrases using sentence and segment delimiters.
-
-    :param text: Input text to split.
-    :return: List of phrases.
-    """
-    
-    verbose_output(f"{BackgroundColors.GREEN}Splitting text into phrases for deduplication...{Style.RESET_ALL}")  # Output the verbose message
-    
-    delimiters = [". ", "\n", "\r", ".", "! ", "? ", "• ", "- ", "– ", "— "]  # Delimiters for splitting
-    segments = [text]  # Initialize with full text
-    
-    for delim in delimiters:  # Iterate over delimiters
-        temp = []  # Temporary list for split segments
-        for seg in segments:  # Iterate over current segments
-            temp.extend(seg.split(delim))  # Split segment and extend temp
-        segments = temp  # Update segments with split results
-    
-    return [s.strip() for s in segments if s.strip()]  # Return non-empty, stripped phrases
-
-
-def normalize_text_field_for_product_scraping(value, field_name: str = "Field", warn_prefix: str = "") -> str:
-    """
-    Normalize a product text field to a string for downstream processing.
-
-    Handles dict, list, None, and non-string types robustly, with warnings.
-
-    :param value: The input value to normalize (any type).
-    :param field_name: Name of the field for warning messages.
-    :param warn_prefix: Optional prefix for warning messages (e.g., 'Description', 'Product details').
-    :return: Normalized string value safe for text processing.
-    """
-    
-    if isinstance(value, dict):  # If value is a dictionary
-        if not value:  # If dict is empty
-            verbose_output(f"{BackgroundColors.GREEN}[WARNING] {warn_prefix}{field_name} field is a dictionary but it's empty, converting to empty string.{Style.RESET_ALL}")  # Warn about empty dict
-            return ""  # Return empty string for empty dict
-        verbose_output(f"{BackgroundColors.GREEN}[WARNING] {warn_prefix}{field_name} field is a dictionary, converting to string. Value: {value}{Style.RESET_ALL}")  # Warn about dict type
-        return ",\n".join(f"{str(k)}: {str(v)}" for k, v in value.items()) + ","  # Format as requested
-    elif isinstance(value, list):  # If value is a list
-        verbose_output(f"{BackgroundColors.GREEN}[WARNING] {warn_prefix}{field_name} field is a list, joining as string. Value: {value}{Style.RESET_ALL}")  # Warn about list type
-        return " ".join(str(x) for x in value if isinstance(x, str))  # Join string elements
-    elif value is None:  # If value is None
-        verbose_output(f"{BackgroundColors.GREEN}[WARNING] {warn_prefix}{field_name} field is None, converting to empty string.{Style.RESET_ALL}")  # Warn about None value
-        return ""  # Return empty string for None
-    elif not isinstance(value, str):  # If value is not a string
-        verbose_output(f"{BackgroundColors.GREEN}[WARNING] {warn_prefix}{field_name} field is not a string, skipping normalization. Type: {type(value)} Value: {value}{Style.RESET_ALL}")  # Warn about unknown type
-        return str(value)  # Convert to string as fallback
-    return value  # Return string as-is
 
 
 
 
 
 
-def parse_price_from_components(integer_part: str, decimal_part: str) -> Optional[float]:
-    """
-    Parse Brazilian-style split price components into a float.
 
-    :param integer_part: Integer portion of the price (e.g., "1.000", "100", "N/A").
-    :param decimal_part: Decimal portion of the price (e.g., "99", "00", "N/A").
-    :return: Float price value, or None when components are absent or malformed.
-    """
 
-    int_str = str(integer_part).strip() if integer_part is not None else ""  # Normalize integer part to string
-    dec_str = str(decimal_part).strip() if decimal_part is not None else ""  # Normalize decimal part to string
-
-    if int_str in ("N/A", ""):  # Verify integer part is a valid non-absent value
-        return None  # Return None when integer part is absent or explicitly N/A
-
-    cleaned_int = int_str.replace(".", "").replace(",", "")  # Remove Brazilian thousands separators from integer part
-    if not cleaned_int or not cleaned_int.isdigit():  # Verify cleaned integer contains only digit characters
-        return None  # Return None when integer part is malformed or non-numeric
-
-    if dec_str in ("N/A", "") or not dec_str.isdigit():  # Verify decimal part is a usable digit sequence
-        dec_str = "0"  # Treat absent or non-numeric decimal as zero
-
-    try:  # Attempt numeric reconstruction from validated components
-        int_val = int(cleaned_int)  # Parse validated integer string to int
-        dec_digits = len(dec_str)  # Compute decimal digit count for positional scaling
-        dec_val = int(dec_str) / (10 ** dec_digits)  # Scale decimal digits to fractional value
-        return float(int_val) + dec_val  # Reconstruct full float price from integer and decimal
-    except (ValueError, ZeroDivisionError):  # Handle any numeric conversion or scaling error
-        return None  # Return None when reconstruction fails
 
 
 
@@ -447,342 +364,36 @@ def scrape_product(url, api_keys):
     
 
 
-def read_template_content(template_path: Path) -> Optional[str]:
-    """
-    Read template file content safely.
 
-    :param template_path: Path to the template file to read.
-    :return: The file content string or None when read fails.
-    """
 
-    try:  # Try to ensure the template file exists before reading
-        if not verify_filepath_exists(template_path):  # Verify template file exists at provided path
-            return None  # Return None when file does not exist
 
-        with open(template_path, "r", encoding="utf-8") as f:  # Open the template file for reading
-            content = f.read()  # Read the entire file content into a string
 
-        return content  # Return the read content on success
-    except Exception:  # Handle unexpected exceptions during file I/O
-        return None  # Return None when an exception occurs while reading
 
 
-def detect_product_name(content: str) -> Optional[str]:
-    """
-    Detect the product name from template content.
 
-    :param content: The template file content string.
-    :return: The detected product name string or None when not found.
-    """
 
-    product_name = None  # Initialize variable for detected product name
 
-    for line in content.splitlines():  # Iterate through each line to find a sensible title
-        if line and re.search(r"[A-Za-zÀ-ž0-9]", line):  # Verify line contains visible alphanumeric characters
-            product_name = line.strip()  # Use the first sensible non-empty line as product name
-            break  # Stop after locating the first candidate product name
 
-    return product_name  # Return detected product name or None
 
 
 
 
-def detect_product_url(content: str) -> Optional[str]:
-    """
-    Detect the first HTTP/HTTPS URL in the content.
 
-    :param content: The template file content string.
-    :return: The matched URL string or None when not found.
-    """
 
-    match = re.search(r"https?://[\w\-\.\/~\?&=%#]+", content)  # Search for HTTP/HTTPS URL using existing pattern
-    return match.group(0) if match else None  # Return matched URL or None
 
 
-def detect_price_fields(content: str) -> Tuple[Optional[str], Optional[str], List[str]]:
-    """
-    Detect price-like tokens and extract current and old prices.
 
-    :param content: The template file content string.
-    :return: Tuple(current_price, old_price, price_matches).
-    """
 
-    price_matches = re.findall(r"R\$\s*[\d\.,]+|\b[\d]{1,3}(?:[\.,][\d]{2,3})\b", content)  # Find potential price tokens using existing pattern
 
-    current_price = None  # Initialize current price variable
-    old_price = None  # Initialize old price variable
 
-    if price_matches:  # If one or more price-like tokens were found
-        por_match = re.search(r"POR APENAS\s*\*?R\$\s*([\d\.,]+)\*?", content, re.IGNORECASE)  # Try to capture current price from explicit phrase
-        if por_match:  # Verify the explicit current price phrase matched
-            current_price = por_match.group(1).strip()  # Extract numeric portion for current price
 
-        de_match = re.search(r"DE\s*\*?R\$\s*([\d\.,]+)\*?", content, re.IGNORECASE)  # Try to capture old price from explicit phrase
-        if de_match:  # Verify the explicit old price phrase matched
-            old_price = de_match.group(1).strip()  # Extract numeric portion for old price
 
-        if current_price is None and old_price is None and any(m.startswith("R$") for m in price_matches):  # Use currency-prefixed fallback when explicit phrases not present
-            r_prices = [m for m in price_matches if m.strip().startswith("R$")]  # Collect tokens that explicitly include currency prefix
-            if r_prices:  # Verify there is at least one currency-prefixed token for fallback logic
-                if len(r_prices) == 1:  # If only one currency-prefixed token exists
-                    current_price = re.sub(r"[^\d,\.]", "", r_prices[0]).strip()  # Normalize token into numeric string for current price
-                else:  # If multiple currency-prefixed tokens exist
-                    old_price = re.sub(r"[^\d,\.]", "", r_prices[0]).strip()  # Normalize first token as old price
-                    current_price = re.sub(r"[^\d,\.]", "", r_prices[-1]).strip()  # Normalize last token as current price
 
-    return current_price, old_price, price_matches  # Return extracted price values and the raw matches list
 
 
-def validate_price_relationships(old_price: Optional[str], current_price: Optional[str], content: str) -> Tuple[bool, Optional[str]]:
-    """
-    Validate logical relationships between detected price fields.
 
-    :param old_price: The detected old price string or None.
-    :param current_price: The detected current price string or None.
-    :param content: The template file content string.
-    :return: Tuple(valid_flag, error_message_or_None).
-    """
 
-    try:  # Try to parse numeric strings into floats for comparison
-        def parse_price(p: str) -> float:  # Define inline parser for localized numeric strings
-            return float(p.replace(".", "").replace(",", "."))  # Convert Brazilian-style numeric to python float
 
-        parsed_old = parse_price(old_price) if old_price else None  # Parse old price when present
-        parsed_current = parse_price(current_price) if current_price else None  # Parse current price when present
-    except Exception:  # Handle parsing exceptions gracefully
-        parsed_old = None  # Reset parsed_old on parse failure
-        parsed_current = None  # Reset parsed_current on parse failure
-
-    if old_price and not current_price:  # Verify old price must not appear without a current price
-        return False, "inconsistent price fields detected"  # Return invalid status and reason when old price exists alone
-
-    discount_present = bool(re.search(r"\d{1,3}%|desconto", content, re.IGNORECASE))  # Detect discount percentage or keyword using existing pattern
-    if discount_present and not old_price:  # Verify discount must not appear without old price
-        return False, "inconsistent price fields detected"  # Return invalid status and reason when discount appears without old price
-
-    if parsed_old is not None and parsed_current is not None and abs(parsed_old - parsed_current) < 1e-6:  # Verify old and current prices are not equal
-        return False, "inconsistent price fields detected"  # Return invalid status when prices are equal
-
-    return True, None  # Return valid status when all logical price verifications passed
-
-
-def output_missing_fields(missing_fields: List[str]) -> bool:
-    """
-    Output formatted warning messages for missing mandatory fields and return true if any fields are missing.
-
-    :param missing_fields: List of missing field names.
-    :return: True if any fields are missing, False otherwise.
-    """
-    
-    if not missing_fields:  # If the list of missing fields is empty
-        return False  # Return False when no fields are missing
-
-    for field in missing_fields:  # Iterate each missing field to create a warning message
-        print(f"{BackgroundColors.RED}Template validation failed: missing mandatory field {BackgroundColors.GREEN}{field}{Style.RESET_ALL}")  # Append formatted message for the missing field
-    
-    return True  # Return True when any missing fields are found
-
-
-def validate_template_file(template_path: Path) -> bool:
-    """
-    Orchestrate template validation using smaller validation functions.
-
-    :param template_path: Path to the template file to validate.
-    :return: True when template is valid, False when invalid.
-    """
-
-    content = read_template_content(template_path)  # Read template file content safely and get string or None
-
-    if content is None:  # Verify the template content was read successfully
-        print(f"{BackgroundColors.YELLOW}[WARNING] Template validation failed: missing mandatory field Template File{Style.RESET_ALL}")  # Log warning when file missing or unreadable
-        return False  # Return False when content could not be read
-
-    missing_fields: List[str] = []  # Initialize list to collect missing mandatory fields
-
-    product_name = detect_product_name(content)  # Detect product name from content using dedicated function
-    if not product_name:  # Verify product name detection result
-        missing_fields.append("Product name")  # Record missing product name when detection failed
-
-    platform_ok = detect_platform_indicator(content)  # Detect platform indicator presence using dedicated function
-    if not platform_ok:  # Verify platform indicator detection result
-        missing_fields.append("Platform indicator")  # Record missing platform indicator when detection failed
-
-    product_url = detect_product_url(content)  # Detect product URL using dedicated function
-    if not product_url:  # Verify product URL detection result
-        missing_fields.append("Product URL")  # Record missing product URL when detection failed
-
-    current_price, old_price, _ = detect_price_fields(content)  # Detect price fields using dedicated function
-    if not current_price:  # Verify current price detection result
-        missing_fields.append("Current price")  # Record missing current price when detection failed
-
-    if missing_fields:  # If any mandatory fields are missing, build and emit warnings
-        msgs = output_missing_fields(missing_fields)  # Build warning messages for missing fields
-        return not msgs  # Return False when mandatory fields are missing
-
-    valid_prices, reason = validate_price_relationships(old_price, current_price, content)  # Validate logical price relationships
-    if not valid_prices:  # Verify result of price relationship validation
-        print(f"{BackgroundColors.YELLOW}[WARNING] Template validation failed: {BackgroundColors.GREEN}{reason}{Style.RESET_ALL}")  # Print price inconsistency warning with color
-        return False  # Return False when price relationships are invalid
-
-    verbose_output(f"{BackgroundColors.GREEN}Template validation successful{Style.RESET_ALL}")  # Output verbose success message when validation passes
-
-    return True  # Return True when all validations passed
-
-
-def ensure_history_file_exists(history_file_path: str) -> bool:
-    """
-    Ensure the JSON history file exists and create it if missing.
-
-    :param history_file_path: Path to the JSON history file.
-    :return: True if the history file exists or was created successfully.
-    """
-
-    history_path = Path(history_file_path)  # Create a Path object for the history file
-    if not history_path.exists():  # Verify if the history file does not exist
-        try:  # Try to create an empty JSON file when missing
-            with history_path.open("w", encoding="utf-8") as f:  # Open the history file for writing
-                json.dump({}, f, indent=2, ensure_ascii=False)  # Initialize file with empty JSON object
-        except Exception as e:  # Handle any exception during file creation
-            print(f"[ERROR] Failed to create history file: {e}")  # Log the error to stdout
-            return False  # Return False when file creation failed
-    return True  # Return True when file already exists or was created
-
-
-
-
-def save_history_file(history: dict, history_file_path: str) -> None:
-    """
-    Save the full history dictionary to the JSON history file on disk.
-
-    :param history: Full history dictionary to persist.
-    :param history_file_path: Path to the JSON history file.
-    :return: None
-    """
-
-    try:  # Try to write the history data to the JSON file
-        with open(history_file_path, "w", encoding="utf-8") as f:  # Open the history file for writing
-            json.dump(history, f, indent=2, ensure_ascii=False)  # Persist history with readable indentation
-    except Exception as e:  # Handle any exceptions during write
-        print(f"[ERROR] Failed to save history file: {e}")  # Log the error to stdout
-        return  # Return early on failure
-
-
-
-
-def remove_url_line_from_single_file(url: str, local_html_path, target_file_path: str) -> bool:
-    """
-    Removes a line containing the specified URL from a single target file.
-
-    :param url: The URL to remove from the target file.
-    :param local_html_path: Optional local HTML path to match for more precise removal.
-    :param target_file_path: Absolute or relative path to the file to modify.
-    :return: True if a line was removed, False otherwise.
-    """
-
-    try:  # Wrap file operations to avoid crashing on IO errors
-        if not verify_filepath_exists(target_file_path):  # Verify if the target file exists before reading
-            return False  # Indicate nothing removed when file is absent
-
-        removed = False  # Track whether a matching line was removed
-        with open(target_file_path, "r", encoding="utf-8") as f:  # Read current target file contents
-            lines = f.readlines()  # Load all lines from target file
-
-        new_lines = []  # Initialize list to collect lines to keep after removal
-
-        for line in lines:  # Iterate over each existing line in the file
-            stripped = line.strip()  # Trim whitespace from current line
-
-            if not stripped:  # Preserve empty lines without alteration
-                new_lines.append(line)  # Keep blank lines as-is
-                continue  # Continue to next line
-
-            parts = stripped.split(None, 1)  # Split into at most 2 tokens (URL and optional path)
-            first_token = parts[0] if parts else ""  # Extract URL token from split result
-            second_token = parts[1].strip() if len(parts) > 1 else None  # Extract optional local path when present
-
-            if not removed and first_token == url:  # Candidate match on URL token
-                if local_html_path:  # Verify if caller provided a local path for exact matching
-                    if second_token and os.path.normpath(second_token) == os.path.normpath(local_html_path):  # Exact local path match against normalized paths
-                        removed = True  # Mark line as removed and skip appending
-                        continue  # Skip appending matched line
-                    else:  # URL matches but local path differs
-                        new_lines.append(line)  # Keep this line when local path does not match
-                        continue  # Continue processing remaining lines
-                else:  # No local path required; remove first matching URL occurrence
-                    removed = True  # Mark line as removed and skip appending
-                    continue  # Skip appending matched line
-
-            new_lines.append(line)  # Keep non-matching line in output
-
-        if removed:  # Write updated lines back to target file only when a line was removed
-            tmp_path = target_file_path + ".tmp"  # Temporary file path for safe atomic write
-            with open(tmp_path, "w", encoding="utf-8") as f:  # Write updated content to temp file
-                f.writelines(new_lines)  # Write kept lines to temporary file
-            try:  # Attempt atomic replace of target file
-                os.replace(tmp_path, target_file_path)  # Replace original with temp file atomically
-            except Exception:  # Fallback to non-atomic write when atomic replace fails
-                with open(target_file_path, "w", encoding="utf-8") as f:  # Open original for direct overwrite
-                    f.writelines(new_lines)  # Write kept lines directly to original file
-
-        return removed  # Return whether a matching line was removed
-    except Exception:  # On any error, do not fail the scraping run
-        return False  # Indicate nothing removed due to exception
-
-
-
-
-def write_prompt_to_file(prompt_content: str, output_directory: str) -> bool:
-    """
-    Write the Gemini prompt content to Prompt.txt in the specified directory.
-
-    :param prompt_content: The full prompt string to write.
-    :param output_directory: The directory where Prompt.txt will be saved.
-    :return: True if the file was written successfully, False otherwise.
-    """
-    
-    verbose_output(f"{BackgroundColors.GREEN}Writing Prompt.txt to directory: {BackgroundColors.CYAN}{output_directory}{Style.RESET_ALL}")  # Output the verbose message
-
-    try:
-        if not os.path.isdir(output_directory):  # Verify if the output directory exists
-            os.makedirs(output_directory, exist_ok=True)  # Create the output directory if it does not exist
-
-        prompt_file_path = os.path.join(output_directory, "Prompt.txt")  # Build the full path for Prompt.txt
-
-        with open(prompt_file_path, "w", encoding="utf-8") as f:  # Open Prompt.txt for writing with UTF-8 encoding
-            f.write(prompt_content)  # Write the prompt content to Prompt.txt
-
-        verbose_output(f"{BackgroundColors.GREEN}Prompt.txt written to: {BackgroundColors.CYAN}{prompt_file_path}{Style.RESET_ALL}")  # Log successful write
-        return True  # Return True when file is written successfully
-    except Exception as e:
-        print(f"{BackgroundColors.YELLOW}[WARNING] Failed to write Prompt.txt: {e}{Style.RESET_ALL}")  # Log warning on failure
-        return False  # Return False when file writing fails
-
-
-def is_model_configuration_failure(error: PermanentApiFailureError) -> bool:
-    """
-    Determine whether a permanent API error represents a model selection/configuration failure.
-
-    :param error: PermanentApiFailureError raised by the Gemini layer.
-    :return: True when the error indicates invalid or unavailable model selection, otherwise False.
-    """
-
-    status_text = str(getattr(error, "status_text", "") or "").strip().upper()  # Normalize permanent status text for deterministic comparisons.
-    raw_message = str(error)  # Read high-level permanent error message for keyword matching.
-    original_message = str(getattr(error, "original_error", "") or "")  # Read original SDK error message for keyword matching.
-    combined_text = f"{raw_message} {original_message}".lower()  # Merge both messages into a single normalized text corpus.
-
-    has_model_token = "model" in combined_text or "models/" in combined_text  # Verify if message references model identifiers directly.
-    has_not_found_hint = "not found" in combined_text or "not_found" in combined_text  # Verify if message reports missing resources.
-    has_invalid_hint = "invalid model" in combined_text or "unsupported model" in combined_text or "unknown model" in combined_text  # Verify if message reports invalid model selection.
-    has_api_version_mismatch_hint = "is not found for api version" in combined_text  # Verify if message reports model/version compatibility mismatch.
-
-    if has_model_token and (has_not_found_hint or has_invalid_hint or has_api_version_mismatch_hint):  # Verify model-specific permanent failure indicators in message text.
-        return True  # Return True when message clearly indicates model selection/configuration failure.
-
-    if status_text == "NOT_FOUND" and has_model_token:  # Verify NOT_FOUND status paired with model references for deterministic fallback classification.
-        return True  # Return True when NOT_FOUND status clearly maps to model lookup failure.
-
-    return False  # Return False when permanent failure does not match model-selection failure patterns.
 
 
 
@@ -814,247 +425,22 @@ def parse_arguments() -> argparse.Namespace:
     return args  # Return parsed argument namespace
 
 
-def load_product_data(product_dir: str) -> Optional[dict]:
-    """
-    Load product_data.json from the specified product directory.
 
-    :param product_dir: Absolute path to the product output directory.
-    :return: Loaded product data dictionary or None when file is missing or unreadable.
-    """
 
-    json_path = os.path.join(product_dir, "product_data.json")  # Build full path to the product data JSON file
-    product_name = os.path.basename(product_dir)  # Use directory name as product identifier for logging
 
-    if not os.path.isfile(json_path):  # Verify if product_data.json exists before attempting to load
-        print(f"{BackgroundColors.RED}[DEBUG] product_data.json not found for: {BackgroundColors.CYAN}{product_name}{Style.RESET_ALL}")  # Log missing JSON file
-        return None  # Return None when file does not exist
 
-    try:  # Try to read and parse the product data JSON file
-        with open(json_path, "r", encoding="utf-8") as f:  # Open JSON file for reading with UTF-8 encoding
-            product_data = json.load(f)  # Parse JSON content into dictionary
-        verbose_output(true_string=f"{BackgroundColors.GREEN}[DEBUG] Loaded product_data.json for: {BackgroundColors.CYAN}{product_name}{Style.RESET_ALL}")  # Log successful JSON load
-        return product_data  # Return loaded product data dictionary
-    except Exception as e:  # If reading or parsing the JSON file fails
-        print(f"{BackgroundColors.YELLOW}[WARNING] Failed to load product_data.json for: {BackgroundColors.CYAN}{product_name}{BackgroundColors.YELLOW}: {e}{Style.RESET_ALL}")  # Report load failure
-        return None  # Return None when product data could not be loaded
 
 
-def generate_and_validate_template_for_product(description_file: str, api_keys: Dict[str, str]) -> bool:
-    """
-    Generate and validate Template.txt for a product using its existing description file.
 
-    :param description_file: Absolute path to the product description file.
-    :param api_keys: Mapping of Gemini API owner names to API key strings.
-    :return: True if generation and validation succeeded, False otherwise.
-    """
 
-    try:  # Try to read the description file content for Gemini generation
-        with open(str(description_file), "r", encoding="utf-8") as f:  # Open description file with UTF-8 encoding
-            product_description = f.read()  # Read full description content as generation input
-    except Exception as e:  # If reading the description file fails
-        print(f"{BackgroundColors.RED}Error reading description file {BackgroundColors.CYAN}{description_file}{BackgroundColors.RED}: {e}{Style.RESET_ALL}")  # Report error reading description file
-        return False  # Return failure when description file cannot be read
 
-    product_url = detect_product_url(product_description) or ""  # Detect product URL from description content for platform-specific generation instructions
 
-    description_dir = os.path.dirname(str(description_file))  # Derive directory containing the description file for product_data loading
-    product_data = load_product_data(description_dir)  # Load persisted product data from product directory for Gemini context
 
-    success = handle_gemini_processing(product_description, description_file, product_data, product_url, api_keys)
 
-    if not success:  # Verify if Gemini generation did not succeed
-        return False  # Return failure when generation did not produce output
 
-    template_file = os.path.join(description_dir, "Template.txt")  # Build path to the generated Template.txt file
-    validate_and_fix_output_file(template_file)  # Validate and fix formatting issues in the generated template
 
-    return True  # Return success after generation and validation complete
 
 
-
-
-def locate_existing_prompt_file(product_dir_path: str) -> Optional[str]:
-    """
-    Locate an existing prompt file in the product directory using supported filename variants.
-
-    :param product_dir_path: Absolute path to the product output directory.
-    :return: Absolute prompt file path when found, otherwise None.
-    """
-
-    for prompt_file_name in ("Prompt.txt", "prompt.txt"):  # Iterate prompt filename variants for compatibility with existing and new naming styles.
-        prompt_path = os.path.join(product_dir_path, prompt_file_name)  # Build absolute path for current prompt filename candidate.
-        if os.path.isfile(prompt_path):  # Verify if this prompt file candidate exists as a regular file.
-            return prompt_path  # Return first existing prompt file path.
-
-    return None  # Return None when no supported prompt file exists.
-
-
-def collect_products_missing_templates(outputs_dir: str) -> List[Tuple[str, str, str]]:
-    """
-    Collect product directories that require Template.txt generation from Prompt.txt.
-
-    :param outputs_dir: Base outputs directory to scan.
-    :return: List of tuples containing (product_dir_path, product_dir_name, prompt_file_path).
-    """
-
-    timestamp_pattern = re.compile(r"^\d+\. \d{4}-\d{2}-\d{2} - \d{2}h\d{2}m\d{2}s$")  # Verify timestamp directory format.
-    product_dirs: List[Tuple[str, str, str]] = []  # Store valid product candidates.
-
-    for timestamp_dir_name in sorted(os.listdir(outputs_dir)):  # Iterate timestamp directories deterministically.
-        timestamp_dir_path = os.path.join(outputs_dir, timestamp_dir_name)  # Build full timestamp path.
-        if not os.path.isdir(timestamp_dir_path):  # Verify entry is directory.
-            continue  # Skip invalid entries.
-        if not timestamp_pattern.match(timestamp_dir_name):  # Verify timestamp format compliance.
-            continue  # Skip non-matching directories.
-
-        verbose_output(f"{BackgroundColors.GREEN}Traversing timestamp directory: {BackgroundColors.CYAN}{timestamp_dir_name}{Style.RESET_ALL}")  # Log traversal step.
-
-        for product_dir_name in sorted(os.listdir(timestamp_dir_path)):  # Iterate product directories.
-            product_dir_path = os.path.join(timestamp_dir_path, product_dir_name)  # Build product path.
-            if not os.path.isdir(product_dir_path):  # Verify directory type.
-                continue  # Skip invalid entries.
-
-            template_file = os.path.join(product_dir_path, "Template.txt")  # Define template path.
-
-            if os.path.exists(template_file):  # Verify template already exists.
-                verbose_output(f"{BackgroundColors.YELLOW}Template already exists in: {BackgroundColors.CYAN}{product_dir_name}{Style.RESET_ALL}")  # Log skip reason.
-                continue  # Skip already processed products.
-
-            prompt_file = locate_existing_prompt_file(product_dir_path)  # Resolve prompt file.
-
-            if prompt_file is None:  # Verify prompt existence.
-                verbose_output(f"{BackgroundColors.YELLOW}Prompt not found in: {BackgroundColors.CYAN}{product_dir_name}{Style.RESET_ALL}")  # Log missing prompt.
-                continue  # Skip invalid product.
-
-            product_dirs.append((product_dir_path, product_dir_name, prompt_file))  # Register valid product.
-    return product_dirs  # Return collected product list.
-
-
-def generate_template_from_prompt_content(prompt_content: str, output_directory: str, owner_name=None, api_key=None, key_index=1, total_keys=1, model_name: str = "gemini-3.1-flash-lite") -> bool:
-    """
-    Generate Template.txt directly from prebuilt prompt content using Gemini AI.
-
-    :param prompt_content: Prompt text read from Prompt.txt file.
-    :param output_directory: Product output directory where Template.txt will be written.
-    :param owner_name: Optional owner name label for the API key used.
-    :param api_key: Gemini API key string to use for this single generation attempt.
-    :param key_index: 1-based index of the API key being used.
-    :param total_keys: Total number of available API keys for log context.
-    :param model_name: Gemini model name for this single generation attempt.
-    :return: True if generation succeeded, False otherwise.
-    """
-
-    if not api_key:  # Verify if a concrete API key was provided by the caller.
-        print(f"{BackgroundColors.RED}Error: No Gemini API key provided for generation.{Style.RESET_ALL}")  # Report missing key for this attempt.
-        return False  # Return failure when key is unavailable.
-
-    gemini = None  # Initialize Gemini client reference for safe cleanup in all execution paths.
-
-    try:  # Try a single-key generation request and delegate key rotation to caller.
-        verbose_output(  # Emit verbose key-attempt diagnostics for this single-key attempt.
-            true_string=(
-                f"{BackgroundColors.GREEN}Attempting to use Gemini API key {owner_name or key_index} ({key_index}/{total_keys})...{Style.RESET_ALL}"
-            )
-        )  # Output verbose message.
-
-        verbose_output(  # Emit verbose model-attempt diagnostics for this single-model attempt.
-            true_string=(
-                f"{BackgroundColors.GREEN}Attempting Gemini model {BackgroundColors.CYAN}{model_name}{BackgroundColors.GREEN} with API key {owner_name or key_index}.{Style.RESET_ALL}"
-            )
-        )  # Output verbose message.
-
-        gemini = Gemini(api_key, api_key_index=key_index, model_name=model_name)  # Create Gemini instance with numeric key index and selected model name.
-        formatted_output = gemini.generate_content(prompt_content)  # Generate formatted marketing text using only prompt file content as input.
-
-        if formatted_output:  # Verify if generation returned content.
-            formatted_file = os.path.join(output_directory, "Template.txt")  # Build output file path.
-            gemini.write_output_to_file(formatted_output, formatted_file)  # Write output to file.
-            try:  # Try to validate the generated template file immediately after writing it.
-                valid_template = validate_template_file(Path(formatted_file))  # Validate generated template file and get boolean result.
-                if not valid_template:  # Verify if validation failed for the generated template.
-                    print(f"{BackgroundColors.YELLOW}[WARNING] Template validation failed for file: {BackgroundColors.CYAN}{formatted_file}{Style.RESET_ALL}")  # Log warning when template is invalid.
-            except Exception as e:  # Handle unexpected exceptions raised by the validation function.
-                print(f"{BackgroundColors.YELLOW}[WARNING] Template validation failed: {e}{Style.RESET_ALL}")  # Log warning including exception message when validation raises.
-
-            return True  # Return success for this key attempt even if validation logged warnings.
-
-        verbose_output(f"{BackgroundColors.YELLOW}API key {owner_name or key_index} returned empty response.{Style.RESET_ALL}")  # Report empty successful-response body.
-        return False  # Return failure for empty response.
-    except QuotaExceededError as e:  # Handle controlled quota exhaustion from Gemini layer.
-        print(f"{BackgroundColors.YELLOW}[WARNING] API key {BackgroundColors.CYAN}{owner_name or key_index}{BackgroundColors.YELLOW} quota exhausted. Retry category: {BackgroundColors.CYAN}{e.status_text or 'QUOTA_EXHAUSTED'}{BackgroundColors.YELLOW}. Rotating to next API key.{Style.RESET_ALL}")  # Emit deterministic quota-rotation warning with retry category.
-        raise e  # Re-raise controlled signal so caller can rotate without skipping URL.
-    except PermanentApiFailureError as e:  # Handle permanent non-retryable API failure from Gemini layer.
-        if is_model_configuration_failure(e):  # Verify if permanent error is strictly model-selection related.
-            print(f"{BackgroundColors.YELLOW}[WARNING] Permanent model failure detected for model {BackgroundColors.CYAN}{model_name}{BackgroundColors.YELLOW} with key {BackgroundColors.CYAN}{owner_name or key_index}{BackgroundColors.YELLOW}. Falling back to next model.{Style.RESET_ALL}")  # Report model-specific permanent failure and allow deterministic fallback.
-            return False  # Return failure for this model attempt so caller can continue fallback sequence.
-        print(f"{BackgroundColors.RED}[ERROR] Permanent API failure with key {BackgroundColors.CYAN}{owner_name or key_index}{BackgroundColors.RED}: {e}{Style.RESET_ALL}")  # Report permanent failure for this key attempt.
-        raise e  # Re-raise permanent failure signal so caller can abort all key rotation.
-    except Exception as e:  # Handle non-quota generation failures.
-        verbose_output(f"{BackgroundColors.RED}Error with API key {owner_name or key_index}: {e}{Style.RESET_ALL}")  # Report unexpected generation failure.
-        return False  # Return failure for non-quota errors.
-    finally:  # Guarantee client cleanup regardless of success, quota signal, or generic failure.
-        if gemini is not None:  # Verify if Gemini client was instantiated before cleanup.
-            gemini.close()  # Close Gemini client to release resources.
-
-
-
-
-def generate_and_validate_template_from_prompt_for_product(prompt_file: str, api_keys: Dict[str, str]) -> bool:
-    """
-    Generate and validate Template.txt for a product using existing Prompt.txt content.
-
-    :param prompt_file: Absolute path to the product prompt file.
-    :param api_keys: Mapping of Gemini API owner names to API key strings.
-    :return: True if generation and validation succeeded, False otherwise.
-    """
-
-    try:  # Try to read the prompt file content for Gemini generation.
-        with open(str(prompt_file), "r", encoding="utf-8") as f:  # Open prompt file with UTF-8 encoding.
-            prompt_content = f.read()  # Read full prompt content as generation input.
-    except Exception as e:  # If reading the prompt file fails.
-        print(f"{BackgroundColors.RED}Error reading prompt file {BackgroundColors.CYAN}{prompt_file}{BackgroundColors.RED}: {e}{Style.RESET_ALL}")  # Report error reading prompt file.
-        return False  # Return failure when prompt file cannot be read.
-
-    output_directory = os.path.dirname(str(prompt_file))  # Derive directory containing the prompt file for output path.
-
-    success = handle_gemini_prompt_processing(prompt_content, output_directory, api_keys)  # Generate and validate template output using prompt-only processing path.
-
-    if not success:  # Verify if Gemini generation did not succeed.
-        return False  # Return failure when generation did not produce output.
-
-    template_file = os.path.join(output_directory, "Template.txt")  # Build path to the generated Template.txt file.
-    validate_and_fix_output_file(template_file)  # Validate and fix formatting issues in the generated template.
-
-    return True  # Return success after generation and validation complete.
-
-
-def process_template_generation_item(product_dir_path: str, product_dir_name: str, prompt_file: str, api_keys: Dict[str, str]) -> bool:
-    """
-    Generate and validate Template.txt for a single product directory.
-
-    :param product_dir_path: Product directory path.
-    :param product_dir_name: Product directory name.
-    :param prompt_file: Prompt.txt file path.
-    :param api_keys: API keys for generation.
-    :return: True if successful, False otherwise.
-    """
-
-    template_file = os.path.join(product_dir_path, "Template.txt")  # Build template path.
-
-    if os.path.exists(template_file):  # Verify template existence.
-        verbose_output(f"{BackgroundColors.GREEN}[DEBUG] Template already exists for: {BackgroundColors.CYAN}{product_dir_name}{Style.RESET_ALL}")  # Log skip.
-        return True  # Treat as success because no action required.
-
-    verbose_output(f"{BackgroundColors.GREEN}Generating Template.txt from Prompt.txt for: {BackgroundColors.CYAN}{product_dir_name}{Style.RESET_ALL}")  # Log generation start.
-
-    success = generate_and_validate_template_from_prompt_for_product(prompt_file, api_keys)  # Execute generation pipeline.
-
-    if success:  # Verify success state.
-        verbose_output(f"{BackgroundColors.GREEN}Successfully generated Template.txt for: {BackgroundColors.CYAN}{product_dir_name}{Style.RESET_ALL}")  # Log success.
-        return True  # Return success.
-
-    print(f"{BackgroundColors.RED}Failed to generate Template.txt for: {BackgroundColors.CYAN}{product_dir_name}{Style.RESET_ALL}")  # Log failure.
-    return False  # Return failure.
 
 
 

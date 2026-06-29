@@ -238,26 +238,6 @@ class Gemini:
         return (True, True)  # Return quota available, retry allowed
 
 
-    def read_input_file(self, file_path=INPUT_FILE):
-        """
-        Reads the input file.
-        
-        :param file_path: The path to the input file.
-        :return: The content of the file.
-        """
-        
-        verbose_output(true_string=f"{BackgroundColors.GREEN}Reading the input file...{Style.RESET_ALL}")
-        
-        if not os.path.exists(file_path):  # If the input file does not exist
-            print(
-                f"{BackgroundColors.RED}Input file {BackgroundColors.CYAN}{file_path}{BackgroundColors.RED} not found.{Style.RESET_ALL}"
-            )
-            sys.exit(1)  # Exit the program
-        
-        with open(file_path, "r") as file:  # Open the input file
-            content = file.read()  # Read the content of the file
-        
-        return content  # Return the content of the file
 
 
     def is_retryable_api_error(self, error):
@@ -412,68 +392,10 @@ class Gemini:
                 time.sleep(wait_seconds)  # Wait before retrying the same request
 
 
-    def start_chat_session(self):
-        """
-        Start a chat session with the model.
-        
-        :return: The chat session.
-        """
-        
-        verbose_output(true_string=f"{BackgroundColors.GREEN}Starting the chat session...{Style.RESET_ALL}")
-        
-        self.chat = self.client.chats.create(model=self.model)  # Create a new chat session
-        return self.chat  # Return the chat session
 
 
-    def send_message(self, message, config=None):
-        """
-        Send a message in the chat session and get the output.
-
-        :param message: The user message to send.
-        :param config: Optional configuration (temperature, max_output_tokens, etc.).
-        :return: The output text.
-        """
-
-        quota_available, retry_allowed = self.verify_api_quota_state()  # Get quota and retry state
-        if not quota_available:  # If quota is exhausted
-            raise QuotaExceededError("Quota already exhausted for this API key.")  # Raise quota exhaustion error
-
-        verbose_output(true_string=f"{BackgroundColors.GREEN}Sending the message...{Style.RESET_ALL}")
-
-        if self.chat is None:  # If the chat session has not been started
-            self.start_chat_session()  # Start the chat session
-
-        assert self.chat is not None  # Ensure chat is initialized
-        chat_session = self.chat  # Store non-null chat session reference for type-safe lambda usage
-        response = self.execute_with_retry(lambda: chat_session.send_message(message), operation_name="send_message")  # Send message with retry for transient API failures
-        return response.text  # Return the output text
 
 
-    def generate_content(self, prompt, config=None):
-        """
-        Generate content without maintaining chat history (stateless).
-
-        :param prompt: The prompt to send to the model.
-        :param config: Optional configuration (temperature, system_instruction, etc.).
-        :return: The generated text.
-        """
-
-        quota_available, retry_allowed = self.verify_api_quota_state()  # Get quota and retry state
-        
-        if not quota_available:  # If quota is exhausted
-            raise QuotaExceededError("Quota already exhausted for this API key.")  # Raise quota exhaustion error
-
-        verbose_output(true_string=f"{BackgroundColors.GREEN}Generating content...{Style.RESET_ALL}")
-
-        response = self.execute_with_retry(
-            lambda: self.client.models.generate_content(
-                model=self.model,
-                contents=prompt,
-                config=config
-            ),
-            operation_name="generate_content",
-        )  # Generate content with retry for transient API failures
-        return response.text  # Return the generated text
 
 
     def generate_content_from_image(self, prompt, image_path, config=None):
@@ -507,19 +429,6 @@ class Gemini:
         )  # Generate multimodal content with retry for transient API failures
         return response.text  # Return the generated text
 
-    def write_output_to_file(self, output, file_path=OUTPUT_FILE):
-        """
-        Writes the chat output to a specified file.
-        
-        :param output: The output to write.
-        :param file_path: The path to the file.
-        :return: None
-        """
-        
-        verbose_output(true_string=f"{BackgroundColors.GREEN}Writing the output to the file...{Style.RESET_ALL}")
-        
-        with open(file_path, "w", encoding="utf-8") as file:  # Open the file for writing with UTF-8
-            file.write(output)  # Write the output to the file
 
 
     def close(self):
