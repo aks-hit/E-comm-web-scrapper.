@@ -552,7 +552,7 @@ def prepare_input_urls() -> tuple:
         print(f"{BackgroundColors.RED}Error: Failed to read URLs from file: {BackgroundColors.CYAN}{INPUT_FILE}{BackgroundColors.RED}. Please ensure the file exists and is readable in that specified paths. Be careful with the parent directory of the file as well.{Style.RESET_ALL}")  # Print file read error with details and suggestions.
         return [], 0  # Return empty list and zero count when input file cannot be loaded
 
-    normalized_lines = normalize_paths_to_unix(raw_lines)  # Normalize Windows-style paths to Unix-style before any downstream processing
+    normalized_lines = raw_lines  # Normalize Windows-style paths to Unix-style before any downstream processing
     processed_lines = preprocess_urls(normalized_lines)  # Preprocess lines (strip, remove prefixes, sort)
     write_urls_to_file(processed_lines, INPUT_FILE, recursive=True, sort=True)  # Write preprocessed lines back to input file for deterministic retries and user reference
 
@@ -590,38 +590,6 @@ def initialize_processing_context(staging_output_dir: str) -> dict:
 
 
 
-def normalize_product_data_paths(product_data: dict) -> dict:
-    """
-    Normalize all path fields in product_data to Unix-style.
-
-    :param product_data: Dictionary containing product data fields.
-    :return: Dictionary with all path fields normalized to Unix-style.
-    """
-
-    if not isinstance(product_data, dict):  # Verify if product_data is a dictionary
-        return product_data  # Return as is if not a dictionary
-
-    path_keys = [
-        "local_html_path",
-        "html_path",
-        "zip_path",
-        "extracted_dir",
-        "description_file",
-        "product_directory",
-        "product_dir",
-        "input_source",
-        "output_file",
-        "output_dir",
-    ]  # List of known path-related keys in product_data
-
-    normalized = product_data.copy()  # Copy product_data to avoid mutating input
-
-    for key in path_keys:  # Iterate over known path keys
-        if key in normalized and isinstance(normalized[key], str):  # Verify key exists and is a string
-            # Use normalize_paths_to_unix to normalize this single path string
-            normalized[key] = normalize_paths_to_unix([normalized[key]])[0]
-
-    return normalized  # Return normalized product_data
 
 
 def reorder_product_data_fields(product_data: dict, url: str) -> dict:
@@ -662,7 +630,6 @@ def save_product_data_json(product_data: dict, product_dir: str, url: str) -> bo
     """
     Append the product data dictionary to a unified products.json file.
     """
-    product_data = normalize_product_data_paths(product_data)
     product_data = reorder_product_data_fields(product_data, url)
     json_path = os.path.join(OUTPUT_DIRECTORY, "products.json")
     product_name = product_data.get("product_name_safe", product_data.get("product_name", product_data.get("name", "unknown")))
