@@ -106,34 +106,7 @@ def remove_dash_prefixes(input_urls: list[str]) -> list[str]:
     return updated  # Return the processed list of URLs
 
 
-def normalize_paths_to_unix(input_urls: list[str]) -> list[str]:
-    """
-    Normalize Windows-style paths in URL entries to Unix-style paths.
 
-    Converts backslashes "\" (single or multiple) to forward slashes "/"
-    only in the optional filename/path portion, preserving the URL.
-
-    :param input_urls: List of raw URL lines (URL + optional filename).
-    :return: New list with normalized paths.
-    """
-
-    normalized_urls: list[str] = []  # Initialize list to store normalized URL entries
-
-    for line in input_urls:  # Iterate over each input line
-        parts = line.split(None, 1)  # Split into URL and optional filename/path
-
-        if not parts:  # Safety verification for empty split result
-            continue  # Skip malformed/empty entries
-
-        product_url = parts[0].strip()  # Extract URL portion
-
-        if len(parts) > 1 and parts[1].strip():  # Verify if a filename/path exists
-            path_part = parts[1].strip().replace("\\", "/")  # Normalize backslashes to forward slashes
-            normalized_urls.append(f"{product_url} {path_part}")  # Reconstruct normalized line
-        else:
-            normalized_urls.append(product_url)  # Keep only URL when no path is present
-
-    return normalized_urls  # Return list with normalized paths
 
 
 def sort_urls(input_urls: list[str]) -> list[str]:
@@ -155,7 +128,7 @@ def sort_urls(input_urls: list[str]) -> list[str]:
 def preprocess_urls(urls: list[str]) -> list[str]:
     """
     Preprocesses a list of URLs by stripping whitespace and removing empty entries.
-    Also, it calls four functions. One for stripping whitespace and filtering empty entries, another for removing dash prefixes, another for normalizing paths to Unix-style, and another for sorting the URLs alphabetically.
+    Also, it calls three functions. One for stripping whitespace and filtering empty entries, another for removing dash prefixes, and another for sorting the URLs alphabetically.
 
     :param urls: A list of URL strings to preprocess.
     :return: A new list of preprocessed URL strings.
@@ -165,8 +138,7 @@ def preprocess_urls(urls: list[str]) -> list[str]:
 
     cleaned = strip_whitespace_and_filter(urls)  # Remove leading/trailing whitespace and filter out empty strings
     without_prefixes = remove_dash_prefixes(cleaned)  # Remove any leading "-- " or "- " prefixes from the URLs
-    normalized = normalize_paths_to_unix(without_prefixes)  # Normalize Windows-style paths to Unix-style paths
-    sorted_urls = sort_urls(normalized)  # Sort the URLs in alphabetical order
+    sorted_urls = sort_urls(without_prefixes)  # Sort the URLs in alphabetical order
     
     return sorted_urls  # Return the URLs sorted in alphabetical order
 

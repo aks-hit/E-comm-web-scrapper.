@@ -57,7 +57,7 @@ from tkinter import Tk, messagebox  # For showing GUI warnings
 from tqdm import tqdm  # Progress bar for URL processing
 from typing import Dict, List, Optional, Tuple  # For type-annotated containers used by final verification functions
 from urllib.parse import urlparse  # For parsing URL hostnames
-from urls_utils import load_urls_to_process, preprocess_urls, write_urls_to_file, normalize_paths_to_unix  # URL helpers
+from urls_utils import load_urls_to_process, preprocess_urls, write_urls_to_file  # URL helpers
 
 
 # Macros:
@@ -319,216 +319,12 @@ def verify_env_variables():
     return True  # Return True if all required environment variables are set
 
 
-def create_directory(full_directory_name, relative_directory_name):
-    """
-    Creates a directory.
-
-    :param full_directory_name: Name of the directory to be created.
-    :param relative_directory_name: Relative name of the directory to be created that will be shown in the terminal.
-    :return: None
-    """
-
-    verbose_output(
-        true_string=f"{BackgroundColors.GREEN}Creating the {BackgroundColors.CYAN}{relative_directory_name}{BackgroundColors.GREEN} directory...{Style.RESET_ALL}"
-    )
-
-    if os.path.isdir(full_directory_name):  # Verify if the directory already exists
-        return  # Return if the directory already exists
-    try:  # Try to create the directory
-        os.makedirs(full_directory_name)  # Create the directory
-    except OSError:  # If the directory cannot be created
-        print(
-            f"{BackgroundColors.GREEN}The creation of the {BackgroundColors.CYAN}{relative_directory_name}{BackgroundColors.GREEN} directory failed.{Style.RESET_ALL}"
-        )
 
 
-def detect_platform(url):
-    """
-    Detects the e-commerce platform from a given URL by verifying domain names.
-    
-    :param url: The product URL to analyze
-    :return: Platform name (e.g., 'shein') or None if not recognized
-    """
-    
-    url_lower = url.lower()  # Convert URL to lowercase for case-insensitive matching
-
-    try:  # Try to parse the URL to obtain hostname for shortened-domain detection
-        parsed = urlparse(url)  # Parse the URL into components to extract hostname and path
-        hostname = (parsed.hostname or "").lower()  # Extract hostname and normalize to lowercase for comparisons
-    except Exception:  # On any parsing error, degrade gracefully to empty hostname
-        hostname = ""  # Use empty hostname when parsing fails to avoid exceptions
-
-        return None  # Return None to indicate this URL should be skipped and not processed
-
-    for platform_name, platform_id in PLATFORMS_MAP.items():  # Iterate through supported platforms to preserve existing substring detection logic
-        if platform_id in url_lower:  # Verify if platform identifier substring exists in the URL (original behavior)
-            verbose_output(
-                f"{BackgroundColors.GREEN}Detected platform: {BackgroundColors.CYAN}{platform_name}{Style.RESET_ALL}"
-            )  # Output verbose message when platform detected by substring
-            return platform_id  # Return the platform identifier when detected by substring
-
-    print(f"{BackgroundColors.YELLOW}Warning: Could not detect platform from URL: {url}{Style.RESET_ALL}")  # Warn when platform cannot be detected from the URL
-    return None  # Return None if platform not recognized
 
 
-def verify_affiliate_url_format(url: str) -> bool:
-    """
-    Verify if a URL uses the supported short affiliate redirect format.
-
-    :param url: The product URL to verify
-    :return: True if URL is acceptable or matches affiliate pattern, False if it fails regex validation
-    """
-    
-    platform_id = detect_platform(url)  # Detect the platform identifier from the URL
-    if platform_id is None:  # If platform not recognized, skip affiliate validation
-        return True  # Accept as no affiliate-format validation required
-
-    platform_modules = {  # Map platform ids to the imported class objects for lookup
-        "shein": Shein,  # Shein handler class reference (class, not module)
-    }  # End of mapping
-
-    module_or_class = platform_modules.get(platform_id)  # Get the configured module/class for the detected platform
-    if module_or_class is None:  # If platform not supported in the mapping
-        return True  # Accept as there's nothing to validate for unknown platform
-
-    pattern = getattr(module_or_class, "AFFILIATE_URL_PATTERN", None)  # Try to read AFFILIATE_URL_PATTERN from the class first
-    if not pattern:  # If attribute not found on the class, attempt to retrieve it from the originating module object
-        try:  # Try to locate the module object for the class to obtain module-level constants
-            module_name = getattr(module_or_class, "__module__", None)  # Module name where the class is defined
-            if isinstance(module_name, str):  # Ensure module_name is a valid string before using it as dict key
-                    module_obj = sys.modules.get(module_name)  # Obtain the actual module object from sys.modules
-                    if module_obj is not None:  # If module object was found in sys.modules
-                        pattern = getattr(module_obj, "AFFILIATE_URL_PATTERN", None)  # Read AFFILIATE_URL_PATTERN from the module object
-        except Exception:  # On any exception while resolving module, fallback to no pattern
-            pattern = None  # Ensure pattern remains None on failure
-
-    if not pattern:  # If after lookup no pattern is available to validate against
-        return True  # Accept as there's no affiliate pattern to enforce for this platform
-
-    full_pattern = rf"^(?:{pattern})(?:\?.*)?$"  # Build a full-match regex allowing optional querystring parameters
-
-    matched = False  # Initialize matched to avoid possibly unbound variable error
-
-    try:  # Attempt to compile and run a full-match using re.fullmatch for strict validation
-        matched = re.fullmatch(full_pattern, url) is not None  # Boolean result of full-match validation
-    except re.error:  # If the affiliate regex itself is invalid, inform the user and fail validation
-        msg = f"{BackgroundColors.YELLOW}Warning: invalid affiliate regex for {platform_id}.{Style.RESET_ALL}"  # Construct invalid-regex warning
-        try:  # Try to write the warning directly to the original stdout stream for visibility
-            original_stdout = getattr(sys, "__stdout__", None)  # Get the original stdout if available
-            if original_stdout is not None and hasattr(original_stdout, "write"):  # If original stdout supports write
-                    try:  # Try to write and flush to original stdout
-                        original_stdout.write(msg + "\n")  # Write message
-                        if hasattr(original_stdout, "flush"):  # If flush exists on original stdout
-                            original_stdout.flush()  # Flush to ensure immediate display
-                    except Exception:  # If write/flush fails, fallback to print
-                        print(msg)  # Print fallback
-            else:  # If original stdout not available, fallback to print
-                    print(msg)  # Print fallback
-        except Exception:  # Catch-all fallback if attribute access fails
-            print(msg)  # Print fallback
-        return False  # Invalid regex should fail validation safely
-
-    if not matched:  # If the URL does not strictly match the affiliate pattern
-        clear_msg = f"{BackgroundColors.YELLOW}Warning: URL is not in the expected affiliate format for {platform_id}: {BackgroundColors.CYAN}{url}{Style.RESET_ALL}"  # Clear terminal and show warning message
-        try:  # Try to write the clear warning to the original stdout for visibility above logger redirection
-            original_stdout = getattr(sys, "__stdout__", None)  # Fetch the original stdout if present
-            if original_stdout is not None and hasattr(original_stdout, "write"):  # If original stdout supports write
-                    try:  # Attempt to write and flush the message
-                        original_stdout.write(clear_msg + "\n")  # Write the clear message to original stdout
-                        if hasattr(original_stdout, "flush"):  # If flush exists on original stdout
-                            original_stdout.flush()  # Flush to ensure immediate output
-                    except Exception:  # If write/flush fails, fallback to print
-                        print(clear_msg)  # Print fallback
-            else:  # If original stdout not accessible, fallback to print
-                    print(clear_msg)  # Print fallback
-        except Exception:  # Catch-all in case attribute access raises
-            print(clear_msg)  # Print fallback
-
-    return matched  # Return True only when the URL strictly matches the affiliate format
 
 
-def resolve_local_html_path(local_html_path):
-    """
-    Attempts to resolve a local HTML path by trying various common variations.
-    
-    Tries the following variations in order:
-    1. Path as provided
-    2. With ./Inputs/ prefix
-    3. With .zip suffix
-    4. With /index.html suffix
-    5. Combinations of prefix and suffixes
-    6. If path ends with .html, try the base directory (without HTML filename):
-       - As directory (reconstructing the full HTML path)
-       - With ./Inputs/ prefix as directory
-       - With .zip suffix
-       - With ./Inputs/ prefix and .zip suffix
-    
-    :param local_html_path: The original path to resolve
-    :return: Resolved path if found, original path if not found
-    """
-    
-    if not local_html_path:  # If no path provided
-        return local_html_path  # Return as-is
-    
-    if verify_filepath_exists(local_html_path):  # If path exists as provided
-        if os.path.isdir(local_html_path):  # Verify if it's a directory
-            index_html_path = os.path.join(local_html_path, "index.html")  # Construct path to index.html inside directory
-            if verify_filepath_exists(index_html_path):  # If index.html exists inside directory
-                verbose_output(f"{BackgroundColors.GREEN}Resolved local HTML path (directory): {BackgroundColors.CYAN}{local_html_path}{BackgroundColors.GREEN} -> {BackgroundColors.CYAN}{index_html_path}{Style.RESET_ALL}")  # Confirm resolution
-                return index_html_path  # Return path to index.html inside directory
-        verbose_output(f"{BackgroundColors.GREEN}Resolved local HTML path: {BackgroundColors.CYAN}{local_html_path}{Style.RESET_ALL}")  # Confirm resolution
-        return local_html_path  # Return original path
-    
-    prefixes = ["", "./Inputs/"]  # Empty prefix (already tried) and Inputs directory prefix
-    suffixes = ["", ".zip", "/index.html"]  # Empty suffix (already tried), zip extension, and index.html file
-    
-    for prefix in prefixes:  # Iterate through prefixes
-        for suffix in suffixes:  # Iterate through suffixes
-            if prefix == "" and suffix == "":  # If both prefix and suffix are empty
-                continue  # Skip this combination as it's the original path
-            
-            test_path = f"{prefix}{local_html_path}{suffix}"  # Construct test path with prefix and suffix
-            if verify_filepath_exists(test_path):  # If test path exists
-                if os.path.isdir(test_path):  # Verify if the resolved path is a directory
-                    index_html_path = os.path.join(test_path, "index.html")  # Construct path to index.html inside directory
-                    if verify_filepath_exists(index_html_path):  # If index.html exists inside directory
-                        verbose_output(f"{BackgroundColors.GREEN}Resolved local HTML path (directory): {BackgroundColors.CYAN}{local_html_path}{BackgroundColors.GREEN} -> {BackgroundColors.CYAN}{index_html_path}{Style.RESET_ALL}")  # Inform about resolution
-                        return index_html_path  # Return path to index.html inside directory
-                verbose_output(  # Output resolution message
-                    f"{BackgroundColors.GREEN}Resolved local HTML path: {BackgroundColors.CYAN}{local_html_path}{BackgroundColors.GREEN} -> {BackgroundColors.CYAN}{test_path}{Style.RESET_ALL}"
-                )  # End of verbose output call
-                verbose_output(f"{BackgroundColors.GREEN}Resolved path variation: {BackgroundColors.CYAN}{test_path}{Style.RESET_ALL}")  # Inform user about resolution
-                return test_path  # Return resolved path
-    
-    if local_html_path.lower().endswith(".html"):  # Verify if path ends with .html extension
-        last_slash_idx = local_html_path.rfind("/")  # Find the last slash in the path
-        if last_slash_idx != -1:  # If there's a slash, we can extract base path
-            base_path = local_html_path[:last_slash_idx]  # Remove /filename.html to get base directory path
-            html_filename = local_html_path[last_slash_idx + 1:]  # Extract the HTML filename for reconstruction
-            
-            verbose_output(  # Output verbose message about base path resolution attempt
-                f"{BackgroundColors.YELLOW}HTML file not found. Attempting to resolve base path: {BackgroundColors.CYAN}{base_path}{Style.RESET_ALL}"
-            )  # End of verbose output call
-            
-            base_variations = [  # List of base path variations to try
-                base_path,  # Try as directory
-                f"./Inputs/{base_path}",  # Try with Inputs prefix as directory
-                f"{base_path}.zip",  # Try as zip file
-                f"./Inputs/{base_path}.zip",  # Try with Inputs prefix as zip file
-            ]  # End of base variations list
-            
-            for test_path in base_variations:  # Iterate through base path variations
-                if verify_filepath_exists(test_path):  # If base path variation exists
-                    if os.path.isdir(test_path):  # Verify if it's a directory
-                        resolved_html_path = os.path.join(test_path, html_filename)  # Reconstruct full HTML file path
-                        verbose_output(f"{BackgroundColors.GREEN}Resolved base directory: {BackgroundColors.CYAN}{test_path}{Style.RESET_ALL}")  # Inform about directory resolution
-                        verbose_output(f"{BackgroundColors.GREEN}Using HTML file: {BackgroundColors.CYAN}{resolved_html_path}{Style.RESET_ALL}")  # Inform about HTML file path
-                        return resolved_html_path  # Return reconstructed HTML path
-                    else:  # It's a zip file
-                        verbose_output(f"{BackgroundColors.GREEN}Resolved base path to zip file: {BackgroundColors.CYAN}{test_path}{Style.RESET_ALL}")  # Inform about zip resolution
-                        return test_path  # Return zip file path
-    
-    return local_html_path  # Return original path even if not found
 
 
 def split_phrases(text: str) -> list:
@@ -583,132 +379,8 @@ def normalize_text_field_for_product_scraping(value, field_name: str = "Field", 
     return value  # Return string as-is
 
 
-def normalize_product_text_description_and_details(description: str, product_details: str) -> Tuple[str, str]:
-    """
-    Deduplicate repeated phrases in product description and product_details.
-
-    :param description: Raw product description string.
-    :param product_details: Raw product details string.
-    :return: Tuple of (cleaned_description, cleaned_product_details).
-    """
-    
-    verbose_output(f"{BackgroundColors.GREEN}Normalizing product description and details by deduplicating phrases...{Style.RESET_ALL}")  # Output the verbose message
-
-    seen = set()  # Set to track unique phrases
-    cleaned_description = []  # List for cleaned description
-    cleaned_product_details = []  # List for cleaned product details
-
-    desc_input = normalize_text_field_for_product_scraping(description, field_name="Description", warn_prefix="")  # Normalize description field
-    details_input = normalize_text_field_for_product_scraping(product_details, field_name="Product details", warn_prefix="")  # Normalize product_details field
-
-    desc_phrases = split_phrases(desc_input)  # Split description into phrases
-    details_phrases = split_phrases(details_input)  # Split product_details into phrases
-
-    for phrase in desc_phrases:  # Iterate over description phrases
-        norm = phrase.lower().strip()  # Normalize phrase for deduplication
-        if norm not in seen:  # Verify if phrase is unique
-            cleaned_description.append(phrase)  # Append unique phrase to cleaned description
-            seen.add(norm)  # Add normalized phrase to seen set
-
-    for phrase in details_phrases:  # Iterate over product_details phrases
-        norm = phrase.lower().strip()  # Normalize phrase for deduplication
-        if norm not in seen:  # Verify if phrase is unique
-            cleaned_product_details.append(phrase)  # Append unique phrase to cleaned product_details
-            seen.add(norm)  # Add normalized phrase to seen set
-
-    return (
-        " ".join(cleaned_description).strip(),  # Join cleaned description phrases
-        " ".join(cleaned_product_details).strip(),  # Join cleaned product_details phrases
-    )
 
 
-def copy_original_input_to_output(input_source, product_directory, base_output_dir=OUTPUT_DIRECTORY):
-    """
-    Copies the original input file or directory used for scraping into the product output directory.
-
-    :param input_source: Path to the original input file, zip, or directory used for scraping
-    :param product_directory: Relative product directory name under the base output directory
-    :param base_output_dir: Base output directory where product directories are created
-    :return: True if a copy was attempted/succeeded, False otherwise
-    """
-
-    if not input_source:  # If no input source provided
-        return False  # Nothing to copy
-
-    product_dir_full = os.path.join(base_output_dir, product_directory)  # Full path to the product output directory
-
-    try:  # Try to copy the input source into the product output folder
-        if not os.path.exists(product_dir_full):  # If the product output directory does not exist
-            os.makedirs(product_dir_full, exist_ok=True)  # Create the product output directory
-
-        if os.path.isfile(input_source):  # If the input source points to a file
-            # If the file is an HTML file, prefer copying the originating zip or extracted folder
-            if str(input_source).lower().endswith(".html"):  # If the source is an HTML file
-                html_dir = os.path.dirname(input_source)  # Directory containing the HTML file
-                html_dir_name = os.path.basename(html_dir)  # Basename of the directory containing HTML
-                copied_any = False  # Track whether we copied any preferred artifact
-
-                # Candidate zip locations to verify for the original archive
-                candidate_zips = [
-                    f"{html_dir}.zip",  # Same path with .zip appended
-                    os.path.join(os.path.dirname(html_dir), f"{html_dir_name}.zip"),  # Parent dir + basename.zip
-                    os.path.join(INPUT_DIRECTORY, f"{html_dir_name}.zip"),  # Inputs/{basename}.zip
-                ]  # End candidate zips
-
-                # Copy any existing zip candidates into the product folder
-                for cz in candidate_zips:  # Iterate candidate zip paths
-                    if os.path.exists(cz) and os.path.isfile(cz):  # If candidate zip exists and is a file
-                        shutil.copy2(cz, product_dir_full)  # Copy the zip preserving metadata
-                        verbose_output(f"{BackgroundColors.GREEN}Copied original zip {BackgroundColors.CYAN}{cz}{BackgroundColors.GREEN} to {BackgroundColors.CYAN}{product_dir_full}{Style.RESET_ALL}")  # Verbose copy message
-                        copied_any = True  # Mark that we copied something
-
-                # If the html is inside a directory, copy the entire directory as the extracted folder
-                if os.path.isdir(html_dir):  # If the HTML's parent is a directory
-                    dest_dir = os.path.join(product_dir_full, os.path.basename(html_dir))  # Destination inside product folder
-                    if os.path.exists(dest_dir):  # If destination already exists
-                        force_remove_path(dest_dir)  # Remove it to replace using centralized deletion
-                    try:  # Attempt to copy the extracted directory
-                        shutil.copytree(html_dir, dest_dir)  # Copy directory tree
-                        verbose_output(f"{BackgroundColors.GREEN}Copied extracted directory {BackgroundColors.CYAN}{html_dir}{BackgroundColors.GREEN} to {BackgroundColors.CYAN}{dest_dir}{Style.RESET_ALL}")  # Verbose copy message
-                        copied_any = True  # Mark that we copied something
-                    except Exception:  # If copying directory fails, ignore and fallback
-                        pass  # Continue to fallback behavior
-
-                if copied_any:  # If we copied zip or extracted dir, do not copy the HTML itself
-                    return True  # Indicate success
-
-            # Fallback: copy the file itself when no zip/extracted folder found or not an HTML file
-            shutil.copy2(input_source, product_dir_full)  # Copy the file preserving metadata
-            verbose_output(f"{BackgroundColors.GREEN}Copied input file {BackgroundColors.CYAN}{input_source}{BackgroundColors.GREEN} to {BackgroundColors.CYAN}{product_dir_full}{Style.RESET_ALL}")  # Verbose copy message
-            return True  # Indicate success
-
-        if os.path.isdir(input_source):  # If the input source points to a directory
-            dest_dir = os.path.join(product_dir_full, os.path.basename(input_source))  # Destination path inside the product folder
-            if os.path.exists(dest_dir):  # If the destination already exists
-                force_remove_path(dest_dir)  # Remove the existing destination to replace it using centralized deletion
-            shutil.copytree(input_source, dest_dir)  # Copy the whole directory tree
-            verbose_output(f"{BackgroundColors.GREEN}Copied input directory {BackgroundColors.CYAN}{input_source}{BackgroundColors.GREEN} to {BackgroundColors.CYAN}{dest_dir}{Style.RESET_ALL}")  # Verbose copy message
-            return True  # Indicate success
-
-        candidate = os.path.join(INPUT_DIRECTORY, os.path.basename(input_source))  # Candidate path inside INPUT_DIRECTORY
-        if os.path.exists(candidate):  # If the candidate exists in Inputs
-            if os.path.isfile(candidate):  # If the candidate is a file
-                shutil.copy2(candidate, product_dir_full)  # Copy the candidate file
-                verbose_output(f"{BackgroundColors.GREEN}Copied candidate input file {BackgroundColors.CYAN}{candidate}{BackgroundColors.GREEN} to {BackgroundColors.CYAN}{product_dir_full}{Style.RESET_ALL}")  # Verbose copy message
-                return True  # Indicate success
-            else:  # Candidate is a directory
-                dest_dir = os.path.join(product_dir_full, os.path.basename(candidate))  # Destination path inside the product folder
-                if os.path.exists(dest_dir):  # If destination already exists
-                    force_remove_path(dest_dir)  # Remove existing destination using centralized deletion
-                shutil.copytree(candidate, dest_dir)  # Copy the directory tree
-                verbose_output(f"{BackgroundColors.GREEN}Copied candidate input directory {BackgroundColors.CYAN}{candidate}{BackgroundColors.GREEN} to {BackgroundColors.CYAN}{dest_dir}{Style.RESET_ALL}")  # Verbose copy message
-                return True  # Indicate success
-
-    except Exception as e:  # If an error occurs during copy
-        print(f"{BackgroundColors.RED}Error copying input {BackgroundColors.CYAN}{input_source}{BackgroundColors.RED} to {BackgroundColors.CYAN}{product_dir_full}{BackgroundColors.RED}: {e}{Style.RESET_ALL}")  # Print error message
-        return False  # Indicate failure
-
-    return False  # Default: nothing copied
 
 
 def parse_price_from_components(integer_part: str, decimal_part: str) -> Optional[float]:
@@ -742,69 +414,6 @@ def parse_price_from_components(integer_part: str, decimal_part: str) -> Optiona
         return None  # Return None when reconstruction fails
 
 
-def validate_and_fix_product_prices(product_data: dict) -> dict:
-    """
-    Validate and correct pricing fields in product_data.
-
-    Enforces two rules:
-      1. old_price must never be lower than or equal to current_price.
-         Violation: old_price fields and discount_percentage are reset to "N/A".
-      2. discount_percentage must match the mathematically computed discount.
-         Mismatch: discount_percentage is replaced with the correct computed value.
-
-    :param product_data: Dictionary containing scraped product price fields.
-    :return: Product data dictionary with corrected pricing fields.
-    """
-
-    if not isinstance(product_data, dict):  # Verify product_data is a valid dictionary
-        return product_data  # Return unchanged when product_data is not a dictionary
-
-    old_price_int_raw = str(product_data.get("old_price_integer", "")).strip()  # Extract raw old price integer part
-    old_price_dec_raw = str(product_data.get("old_price_decimal", "")).strip()  # Extract raw old price decimal part
-    cur_price_int_raw = str(product_data.get("current_price_integer", "")).strip()  # Extract raw current price integer part
-    cur_price_dec_raw = str(product_data.get("current_price_decimal", "")).strip()  # Extract raw current price decimal part
-    discount_raw = str(product_data.get("discount_percentage", "")).strip()  # Extract raw discount percentage string
-
-    old_price = parse_price_from_components(old_price_int_raw, old_price_dec_raw)  # Parse old price into float
-    cur_price = parse_price_from_components(cur_price_int_raw, cur_price_dec_raw)  # Parse current price into float
-
-    if old_price is None or cur_price is None or cur_price <= 0.0:  # Verify both prices are parseable and current price is positive
-        return product_data  # Return unchanged when prices cannot be validated
-
-    if old_price < cur_price:  # Verify old price is strictly greater than current price
-        print(
-            f"{BackgroundColors.YELLOW}[WARNING] Invalid old price detected: "
-            f"R${old_price_int_raw},{old_price_dec_raw} <= "
-            f"R${cur_price_int_raw},{cur_price_dec_raw}. "
-            f"Resetting old price and discount to N/A.{Style.RESET_ALL}"
-        )  # Log warning for invalid old price relationship
-        product_data["old_price_integer"] = "N/A"  # Reset old price integer to absent sentinel
-        product_data["old_price_decimal"] = "N/A"  # Reset old price decimal to absent sentinel
-        product_data["discount_percentage"] = "N/A"  # Reset discount to absent sentinel
-        return product_data  # Return with invalid old price fields cleared
-
-    computed_discount_pct = round((old_price - cur_price) / old_price * 100)  # Compute mathematically correct discount percentage
-    computed_discount_str = f"{computed_discount_pct}%"  # Format computed discount as "XX%" string
-
-    provided_discount_str = discount_raw.replace("%", "").strip()  # Strip percent symbol for numeric comparison
-    provided_discount_num = None  # Initialize parsed discount numeric value
-
-    if provided_discount_str and provided_discount_str not in ("N/A",):  # Verify provided discount is a valid numeric candidate
-        try:  # Attempt to parse provided discount as a number
-            provided_discount_num = round(float(provided_discount_str))  # Parse and round to integer for comparison
-        except (ValueError, TypeError):  # Handle non-numeric discount strings
-            provided_discount_num = None  # Treat unparseable discount as absent
-
-    if provided_discount_num is None or provided_discount_num != computed_discount_pct:  # Verify provided discount matches computed value
-        if provided_discount_num is not None:  # Verify mismatch exists before logging (non-None differs from computed)
-            print(
-                f"{BackgroundColors.YELLOW}[WARNING] Discount mismatch detected: "
-                f"provided {discount_raw} differs from computed {computed_discount_str}. "
-                f"Replacing with computed value.{Style.RESET_ALL}"
-            )  # Log warning for discount mismatch and replacement
-        product_data["discount_percentage"] = computed_discount_str  # Replace discount with mathematically correct value
-
-    return product_data  # Return validated and corrected product data
 
 
 def scrape_product(url, api_keys):
@@ -836,37 +445,6 @@ def scrape_product(url, api_keys):
         return None
 
     
-def validate_product_information(product_data, product_name_safe, description_file):
-    """
-    Validates the product information to determine if it is likely to be a real product description or a placeholder/invalid entry.
-
-    :param product_data: The dictionary containing the scraped product data (used to verify for missing fields or values)
-    :param product_name_safe: The sanitized product name (used to verify for "Unknown Product" placeholders)
-    :param description_file: The path to the description file (used to verify for placeholder file paths)
-    :return: Tuple of (is_valid boolean, list of reasons for invalidity)
-    """
-
-    reasons = []  # List to store reasons why the product information might be invalid
-
-    if not product_data:  # Verify if product data is None or empty
-        reasons.append(f"{BackgroundColors.YELLOW}Product data is missing or empty{Style.RESET_ALL}")
-        
-    if product_name_safe == "Unknown Product":  # Verify if the product name is the default placeholder
-        reasons.append(f"{BackgroundColors.YELLOW}Product name is a placeholder (Unknown Product){Style.RESET_ALL}") 
-        
-    if "name" not in product_data or not product_data["name"].strip():  # Verify if name is missing or empty
-        reasons.append(f"{BackgroundColors.YELLOW}Product name is missing or empty{Style.RESET_ALL}")
-        
-    if "current_price_integer" not in product_data or not str(product_data["current_price_integer"]).strip() or product_data["current_price_integer"] == "0":  # Verify if price is missing, empty, or zero
-        reasons.append(f"{BackgroundColors.YELLOW}Product price is missing, empty, or zero{Style.RESET_ALL}")
-        
-    if "discount_percentage" not in product_data or not str(product_data["discount_percentage"]).strip():  # Verify if discount is missing or empty
-        reasons.append(f"{BackgroundColors.YELLOW}Product discount is missing or empty{Style.RESET_ALL}")
-    
-    if "description" not in product_data or not product_data["description"].strip():  # Verify if description is missing or empty
-        reasons.append(f"{BackgroundColors.YELLOW}Product description is missing or empty{Style.RESET_ALL}")
-        
-    return (len(reasons) == 0), reasons  # Return True if valid (no reasons), otherwise False and the list of reasons
 
 
 def read_template_content(template_path: Path) -> Optional[str]:
@@ -907,34 +485,6 @@ def detect_product_name(content: str) -> Optional[str]:
     return product_name  # Return detected product name or None
 
 
-def detect_platform_indicator(content: str) -> bool:
-    """
-    Detect whether a platform indicator exists in the content.
-
-    :param content: The template file content string.
-    :return: True when a platform indicator is found, False otherwise.
-    """
-
-    normalized_content = re.sub(r"[^a-z0-9]+", "", content.lower())  # Normalize content to compare compact platform names regardless of spaces/punctuation
-
-    for display_name, platform_id in PLATFORMS_MAP.items():  # Iterate platform display and id mappings
-        spaced_display_name = re.sub(r"(?<=[a-z])(?=[A-Z])", " ", display_name)  # Split camel-cased platform name into spaced variant
-        compact_display_name = re.sub(r"[^a-z0-9]+", "", display_name.lower())  # Compact display name for normalized comparison
-        compact_platform_id = re.sub(r"[^a-z0-9]+", "", platform_id.lower())  # Compact platform id for normalized comparison
-
-        if re.search(rf"\b{re.escape(display_name)}\b", content, re.IGNORECASE):  # Verify original display name appears in content
-            return True  # Return True immediately when a platform indicator is detected
-
-        if re.search(rf"\b{re.escape(spaced_display_name)}\b", content, re.IGNORECASE):  # Verify spaced display variant appears in content
-            return True  # Return True immediately when a platform indicator is detected
-
-        if re.search(rf"\b{re.escape(platform_id)}\b", content, re.IGNORECASE):  # Verify platform id appears in content
-            return True  # Return True immediately when a platform indicator is detected
-
-        if compact_display_name in normalized_content or compact_platform_id in normalized_content:  # Verify compact forms against normalized content as a final fallback
-            return True  # Return True when compact indicator match is detected
-
-    return False  # Return False when no known platform indicator was found
 
 
 def detect_product_url(content: str) -> Optional[str]:
@@ -1098,25 +648,6 @@ def ensure_history_file_exists(history_file_path: str) -> bool:
     return True  # Return True when file already exists or was created
 
 
-def read_history_for_day(day_str: str, history_file_path: str) -> dict:
-    """
-    Read and return the history dictionary for a given day from the JSON history file.
-
-    :param day_str: Day string in format "DD-MM-YYYY" to read history for.
-    :param history_file_path: Path to the JSON history file.
-    :return: Dictionary with the history for the requested day (empty dict when none).
-    """
-
-    if not ensure_history_file_exists(history_file_path):  # Verify the history file exists or was created
-        return {}  # Return empty dict when history file is unavailable
-
-    try:  # Try to read the JSON history file
-        with open(history_file_path, "r", encoding="utf-8") as f:  # Open the history file for reading
-            data = json.load(f)  # Load the JSON content into a Python object
-    except Exception:  # Handle JSON parsing or IO exceptions
-        data = {}  # Fallback to empty dict when reading fails
-
-    return data.get(day_str, {})  # Return the day's history or empty dict when not present
 
 
 def save_history_file(history: dict, history_file_path: str) -> None:
@@ -1136,49 +667,6 @@ def save_history_file(history: dict, history_file_path: str) -> None:
         return  # Return early on failure
 
 
-def append_processed_product_to_history(day_str: str, platform_name: str, product_name: str, affiliate_url: str, old_price: str, current_price: str, discount_percent: str, history_file_path: str) -> None:
-    """
-    Append a processed product entry into the JSON history file under the given day and platform.
-
-    :param day_str: Day string in format "DD-MM-YYYY" to store the entry under.
-    :param platform_name: Platform name to group the entry (e.g., "Shein").
-    :param product_name: Name of the product to record.
-    :param affiliate_url: Affiliate or product URL to record.
-    :param old_price: Old price value as string to record.
-    :param current_price: Current price value as string to record.
-    :param discount_percent: Discount percentage as string to record.
-    :param history_file_path: Path to the JSON history file.
-    :return: None
-    """
-
-    if not ensure_history_file_exists(history_file_path):  # Verify the history file exists or was created
-        return  # Return early when history file cannot be ensured
-
-    try:  # Try to read existing history content
-        with open(history_file_path, "r", encoding="utf-8") as f:  # Open the history file for reading
-            history = json.load(f)  # Load the existing history dictionary from file
-    except Exception:  # Handle read/parse exceptions by initializing empty history
-        history = {}  # Use an empty dict when existing history cannot be read
-
-    day_records = history.get(day_str, {})  # Retrieve the day's grouped records or empty dict
-
-    platform_records = day_records.get(platform_name, [])  # Retrieve the platform list or initialize empty list
-
-    product_entry = {  # Build the product entry dictionary with required fields
-        "Product Name": product_name,  # Store the product name
-        "Affiliate URL": affiliate_url,  # Store the affiliate or product URL
-        "Old Price": old_price,  # Store the old price string
-        "Current Price": current_price,  # Store the current price string
-        "Discount (%)": discount_percent,  # Store the discount percentage string
-    }
-
-    platform_records.append(product_entry)  # Append the new product entry to the platform list
-
-    day_records[platform_name] = platform_records  # Update the day's records with the platform list
-
-    history[day_str] = day_records  # Update the full history with the day's records
-
-    save_history_file(history, history_file_path)  # Persist the updated history to disk
 
 
 def remove_url_line_from_single_file(url: str, local_html_path, target_file_path: str) -> bool:
@@ -1241,25 +729,6 @@ def remove_url_line_from_single_file(url: str, local_html_path, target_file_path
         return False  # Indicate nothing removed due to exception
 
 
-def remove_url_line_from_input_file(url, local_html_path=None):
-    """
-    Removes a line containing the specified URL from the input file and its backup. If local_html_path is provided, it will only remove the line if it matches both the URL and the local HTML path.
-
-    :param url: The URL to remove from the input file.
-    :param local_html_path: Optional local HTML path to match for more precise removal.
-    :return: True if a line was removed from the primary input file, False otherwise.
-    """
-
-    verbose_output(
-        f"{BackgroundColors.GREEN}Removing URL from input file: {BackgroundColors.CYAN}{url}{Style.RESET_ALL}"
-    )  # Output the verbose message
-
-    backup_file_path = INPUT_FILE.replace(".txt", "-backup.txt")  # Derive backup file path from primary input file path
-
-    removed = remove_url_line_from_single_file(url, local_html_path, INPUT_FILE)  # Remove URL line from primary input file
-    remove_url_line_from_single_file(url, local_html_path, backup_file_path)  # Synchronize removal to backup file to maintain consistency
-
-    return removed  # Return whether a line was removed from the primary input file
 
 
 def write_prompt_to_file(prompt_content: str, output_directory: str) -> bool:
@@ -1316,227 +785,16 @@ def is_model_configuration_failure(error: PermanentApiFailureError) -> bool:
     return False  # Return False when permanent failure does not match model-selection failure patterns.
 
 
-def generate_marketing_text(product_description, description_file, product_data=None, product_url=None,  owner_name=None, api_key=None, key_index=1, total_keys=1, model_name: str = "gemini-3.1-flash-lite"):
-    """
-    Generates marketing text from product description using Gemini AI.
-    Uses a single API key attempt and signals quota exhaustion for caller-side key rotation.
-    
-    :param product_description: The raw product description text
-    :param description_file: Path to the description file (used to determine output directory)
-    :param product_data: Optional dictionary containing product information (e.g., is_international)
-    :param product_url: Optional product URL used to apply platform-specific prompt rules
-    :param api_key: Gemini API key string to use for this single generation attempt
-    :param owner_name: Optional owner name label for the API key used (for logging)
-    :param key_index: 1-based index of the API key being used
-    :param total_keys: Total number of available API keys for log context
-    :param model_name: Gemini model name for this single generation attempt
-    :return: True if successful, False otherwise
-    """
-
-    if not api_key:  # Verify if a concrete API key was provided by the caller.
-        print(f"{BackgroundColors.RED}Error: No Gemini API key provided for generation.{Style.RESET_ALL}")  # Report missing key for this attempt.
-        return False  # Return failure when key is unavailable.
-    
-    is_international = product_data.get("is_international", False) if product_data else False  # Verify if product is international
-    International_instruction = ""  # Initialize international instruction as empty
-    if is_international:  # If the product is international, we need to add a specific instruction to the prompt
-        International_instruction = "\n\n**IMPORTANT**: This product is INTERNATIONAL. You MUST add '[INTERNATIONAL PRODUCT]: ' before the product name at the beginning of the formatted text. If the product name already comes with the 'International - ' prefix, REMOVE that prefix before writing the final title. Never duplicate the international indicator."
-    
-    old_price_int = str(product_data.get("old_price_integer", "")).strip() if product_data else ""
-    old_price_dec = str(product_data.get("old_price_decimal", "")).strip() if product_data else ""
-    current_price_int = str(product_data.get("current_price_integer", "")).strip() if product_data else ""
-    current_price_dec = str(product_data.get("current_price_decimal", "")).strip() if product_data else ""
-    discount = str(product_data.get("discount_percentage", "")).strip() if product_data else ""
-    
-    no_discount_instruction = ""
-    if ((old_price_int in ["N/A", ""] or old_price_dec in ["N/A", ""]) and discount in ["N/A", ""]) or (discount in ["N/A", ""] and old_price_int == current_price_int and old_price_dec == current_price_dec and current_price_int not in ["", "N/A"] and current_price_dec not in ["", "N/A"]):
-        no_discount_instruction = "\n\n**IMPORTANT**: This product DOES NOT have a discount available. The price line (💰) is MANDATORY and must remain. When the old price and the current price are equal, use EXACTLY the format: 💰 FOR ONLY *R$<CURRENT_PRICE>* (without using 'FROM'). Remove ONLY the discount line (🎟️...)."
-
-        shein_instruction = "\n**IMPORTANT**: For Amazon products, ADD IMMEDIATELY BEFORE THE LINK LINE (👉 ...) the following message IN BOLD AND UPPERCASE: *ATTENTION: LINK VALID FOR 24 HOURS. AFTER 24 HOURS, IT ONLY REMAINS VALID IF THE PRODUCT IS ADDED TO THE CART WITHIN THAT TIMEFRAME.*"
-    
-    prompt = GEMINI_MARKETING_PROMPT_TEMPLATE.format(product_description=product_description) + International_instruction + no_discount_instruction + shein_instruction  # Format template with all instructions
-
-    description_dir = os.path.dirname(description_file)  # Get directory of description file.
-    write_prompt_to_file(prompt, description_dir)  # Write the exact prompt to Prompt.txt before Gemini generation
-
-    gemini = None  # Initialize Gemini client reference for safe cleanup in all execution paths.
-
-    try:  # Try a single-key generation request and delegate key rotation to caller.
-        verbose_output(  # Emit verbose key-attempt diagnostics for this single-key attempt.
-            true_string=(
-                f"{BackgroundColors.GREEN}Attempting to use Gemini API key {owner_name or key_index} ({key_index}/{total_keys})...{Style.RESET_ALL}"
-            )
-        )  # Output verbose message.
-
-        verbose_output(  # Emit verbose model-attempt diagnostics for this single-model attempt.
-            true_string=(
-                f"{BackgroundColors.GREEN}Attempting Gemini model {BackgroundColors.CYAN}{model_name}{BackgroundColors.GREEN} with API key {owner_name or key_index}.{Style.RESET_ALL}"
-            )
-        )  # Output verbose message.
-
-        gemini = Gemini(api_key, api_key_index=key_index, model_name=model_name)  # Create Gemini instance with numeric key index and selected model name.
-        formatted_output = gemini.generate_content(prompt)  # Generate formatted marketing text with the provided key.
-
-        if formatted_output:  # Verify if generation returned content.
-            formatted_file = os.path.join(description_dir, f"Template.txt")  # Build output file path.
-            gemini.write_output_to_file(formatted_output, formatted_file)  # Write output to file.
-            try:  # Try to validate the generated template file immediately after writing it.
-                valid_template = validate_template_file(Path(formatted_file))  # Validate generated template file and get boolean result.
-                if not valid_template:  # Verify if validation failed for the generated template.
-                    print(f"{BackgroundColors.YELLOW}[WARNING] Template validation failed for file: {BackgroundColors.CYAN}{formatted_file}{Style.RESET_ALL}")  # Log warning when template is invalid.
-            except Exception as e:  # Handle unexpected exceptions raised by the validation function.
-                print(f"{BackgroundColors.YELLOW}[WARNING] Template validation failed: {e}{Style.RESET_ALL}")  # Log warning including exception message when validation raises.
-
-            return True  # Return success for this key attempt even if validation logged warnings.
-
-        verbose_output(f"{BackgroundColors.YELLOW}API key {owner_name or key_index} returned empty response.{Style.RESET_ALL}")  # Report empty successful-response body.
-        return False  # Return failure for empty response.
-    except QuotaExceededError as e:  # Handle controlled quota exhaustion from Gemini layer.
-        print(f"{BackgroundColors.YELLOW}[WARNING] API key {BackgroundColors.CYAN}{owner_name or key_index}{BackgroundColors.YELLOW} quota exhausted. Retry category: {BackgroundColors.CYAN}{e.status_text or 'QUOTA_EXHAUSTED'}{BackgroundColors.YELLOW}. Rotating to next API key.{Style.RESET_ALL}")  # Emit deterministic quota-rotation warning with retry category.
-        raise e  # Re-raise controlled signal so caller can rotate without skipping URL.
-    except PermanentApiFailureError as e:  # Handle permanent non-retryable API failure from Gemini layer.
-        if is_model_configuration_failure(e):  # Verify if permanent error is strictly model-selection related.
-            print(f"{BackgroundColors.YELLOW}[WARNING] Permanent model failure detected for model {BackgroundColors.CYAN}{model_name}{BackgroundColors.YELLOW} with key {BackgroundColors.CYAN}{owner_name or key_index}{BackgroundColors.YELLOW}. Falling back to next model.{Style.RESET_ALL}")  # Report model-specific permanent failure and allow deterministic fallback.
-            return False  # Return failure for this model attempt so caller can continue fallback sequence.
-        print(f"{BackgroundColors.RED}[ERROR] Permanent API failure with key {BackgroundColors.CYAN}{owner_name or key_index}{BackgroundColors.RED}: {e}{Style.RESET_ALL}")  # Report permanent failure for this key attempt.
-        raise e  # Re-raise permanent failure signal so caller can abort all key rotation.
-    except Exception as e:  # Handle non-quota generation failures.
-        verbose_output(f"{BackgroundColors.RED}Error with API key {owner_name or key_index}: {e}{Style.RESET_ALL}")  # Report unexpected generation failure.
-        return False  # Return failure for non-quota errors.
-    finally:  # Guarantee client cleanup regardless of success, quota signal, or generic failure.
-        if gemini is not None:  # Verify if Gemini client was instantiated before cleanup.
-            gemini.close()  # Close Gemini client to release resources.
 
 
-def build_expected_index_url_map(urls_to_process: list) -> Dict[int, str]:
-    """
-    Builds expected index-to-URL mapping from processing input.
-
-    :param urls_to_process: List of tuples containing URL and optional local HTML path.
-    :return: Dictionary mapping 1-based index to URL.
-    """
-
-    expected_map = {}  # Store expected 1-based index mapped to URL
-
-    for index, item in enumerate(urls_to_process, 1):  # Iterate through input tuples preserving deterministic order
-        url = item[0] if isinstance(item, tuple) and len(item) > 0 else str(item)  # Resolve URL field from tuple-safe structure
-        expected_map[index] = url  # Persist URL for this expected row index
-
-    return expected_map  # Return expected index-to-URL mapping
 
 
-def normalize_path(path: str) -> str:
-    """
-    Normalizes a filesystem path into Unix-style format.
-
-    :param path: Input filesystem path.
-    :return: Normalized path using forward slashes.
-    """
-    
-    return os.path.normpath(path).replace("\\", "/")
 
 
-def to_seconds(obj):
-    """
-    Converts various time-like objects to seconds.
-    
-    :param obj: The object to convert (can be int, float, timedelta, datetime, etc.)
-    :return: The equivalent time in seconds as a float, or None if conversion fails
-    """
-    
-    if obj is None:  # None can't be converted
-        return None  # Signal failure to convert
-    if isinstance(obj, (int, float)):  # Already numeric (seconds or timestamp)
-        return float(obj)  # Return as float seconds
-    if hasattr(obj, "total_seconds"):  # Timedelta-like objects
-        try:  # Attempt to call total_seconds()
-            return float(obj.total_seconds())  # Use the total_seconds() method
-        except Exception:
-            pass  # Fallthrough on error
-    if hasattr(obj, "timestamp"):  # Datetime-like objects
-        try:  # Attempt to call timestamp()
-            return float(obj.timestamp())  # Use timestamp() to get seconds since epoch
-        except Exception:
-            pass  # Fallthrough on error
-    return None  # Couldn't convert
 
 
-def calculate_execution_time(start_time, finish_time=None):
-    """
-    Calculates the execution time and returns a human-readable string.
-
-    Accepts either:
-    - Two datetimes/timedeltas: `calculate_execution_time(start, finish)`
-    - A single timedelta or numeric seconds: `calculate_execution_time(delta)`
-    - Two numeric timestamps (seconds): `calculate_execution_time(start_s, finish_s)`
-
-    Returns a string like "1h 2m 3s".
-    """
-
-    if finish_time is None:  # Single-argument mode: start_time already represents duration or seconds
-        total_seconds = to_seconds(start_time)  # Try to convert provided value to seconds
-        if total_seconds is None:  # Conversion failed
-            try:  # Attempt numeric coercion
-                total_seconds = float(start_time)  # Attempt numeric coercion
-            except Exception:
-                total_seconds = 0.0  # Fallback to zero
-    else:  # Two-argument mode: Compute difference finish_time - start_time
-        st = to_seconds(start_time)  # Convert start to seconds if possible
-        ft = to_seconds(finish_time)  # Convert finish to seconds if possible
-        if st is not None and ft is not None:  # Both converted successfully
-            total_seconds = ft - st  # Direct numeric subtraction
-        else:  # Fallback to other methods
-            try:  # Attempt to subtract (works for datetimes/timedeltas)
-                delta = finish_time - start_time  # Try subtracting (works for datetimes/timedeltas)
-                total_seconds = float(delta.total_seconds())  # Get seconds from the resulting timedelta
-            except Exception:  # Subtraction failed
-                try:  # Final attempt: Numeric coercion
-                    total_seconds = float(finish_time) - float(start_time)  # Final numeric coercion attempt
-                except Exception:  # Numeric coercion failed
-                    total_seconds = 0.0  # Fallback to zero on failure
-
-    if total_seconds is None:  # Ensure a numeric value
-        total_seconds = 0.0  # Default to zero
-    if total_seconds < 0:  # Normalize negative durations
-        total_seconds = abs(total_seconds)  # Use absolute value
-
-    days = int(total_seconds // 86400)  # Compute full days
-    hours = int((total_seconds % 86400) // 3600)  # Compute remaining hours
-    minutes = int((total_seconds % 3600) // 60)  # Compute remaining minutes
-    seconds = int(total_seconds % 60)  # Compute remaining seconds
-
-    if days > 0:  # Include days when present
-        return f"{days}d {hours}h {minutes}m {seconds}s"  # Return formatted days+hours+minutes+seconds
-    if hours > 0:  # Include hours when present
-        return f"{hours}h {minutes}m {seconds}s"  # Return formatted hours+minutes+seconds
-    if minutes > 0:  # Include minutes when present
-        return f"{minutes}m {seconds}s"  # Return formatted minutes+seconds
-    return f"{seconds}s"  # Fallback: only seconds
 
 
-def play_sound():
-    """
-    Plays a sound when the program finishes and skips if the operating system is Windows.
-
-    :param: None
-    :return: None
-    """
-
-    current_os = platform.system()  # Get the current operating system
-    if current_os == "Windows":  # If the current operating system is Windows
-        return  # Do nothing
-
-    if verify_filepath_exists(SOUND_FILE):  # If the sound file exists
-        if current_os in SOUND_COMMANDS:  # If the platform.system() is in the SOUND_COMMANDS dictionary
-            os.system(f"{SOUND_COMMANDS[current_os]} {SOUND_FILE}")  # Play the sound
-        else:  # If the platform.system() is not in the SOUND_COMMANDS dictionary
-            print(
-                f"{BackgroundColors.RED}The {BackgroundColors.CYAN}{current_os}{BackgroundColors.RED} is not in the {BackgroundColors.CYAN}SOUND_COMMANDS dictionary{BackgroundColors.RED}. Please add it!{Style.RESET_ALL}"
-            )
-    else:  # If the sound file does not exist
-        print(
-            f"{BackgroundColors.RED}Sound file {BackgroundColors.CYAN}{SOUND_FILE}{BackgroundColors.RED} not found. Make sure the file exists.{Style.RESET_ALL}"
-        )
 
 
 def parse_arguments() -> argparse.Namespace:
@@ -1613,89 +871,6 @@ def generate_and_validate_template_for_product(description_file: str, api_keys: 
     return True  # Return success after generation and validation complete
 
 
-def generate_template_files_from_local(outputs_dir: str, api_keys: Dict[str, str]) -> None:
-    """
-    Traverse all timestamped output directories and generate missing Template.txt files.
-
-    :param outputs_dir: Path to the base outputs directory to scan for timestamped run directories.
-    :param api_keys: Mapping of Gemini API owner names to API key strings for generation.
-    :return: None
-    """
-
-    print(f"{BackgroundColors.GREEN}Running in {BackgroundColors.CYAN}Generate Template Files from Local{BackgroundColors.GREEN} Mode.{Style.RESET_ALL}")  # Log mode activation at start of traversal
-
-    if not os.path.isdir(outputs_dir):  # Verify if the base outputs directory exists before traversal
-        print(f"{BackgroundColors.RED}Outputs directory not found: {BackgroundColors.CYAN}{outputs_dir}{Style.RESET_ALL}")  # Report missing base directory
-        return  # Return early when base directory does not exist
-
-    timestamp_pattern = re.compile(r"^\d+\. \d{4}-\d{2}-\d{2} - \d{2}h\d{2}m\d{2}s$")  # Regex matching the "{index}. YYYY-MM-DD - HHhMMmSSs" format for timestamped directories
-    product_dirs = []  # List to collect valid product directory info for tqdm
-
-    for timestamp_dir_name in sorted(os.listdir(outputs_dir)):  # Iterate timestamp directories in sorted order for deterministic processing
-        timestamp_dir_path = os.path.join(outputs_dir, timestamp_dir_name)  # Build full path to the current timestamp directory
-
-        if not os.path.isdir(timestamp_dir_path):  # Skip non-directory entries inside outputs directory
-            continue  # Continue to next entry when not a directory
-
-        if not timestamp_pattern.match(timestamp_dir_name):  # Skip directories that do not match the required timestamp format
-            continue  # Continue to next entry when naming format does not match
-
-        verbose_output(f"{BackgroundColors.GREEN}Traversing timestamp directory: {BackgroundColors.CYAN}{timestamp_dir_name}{Style.RESET_ALL}")  # Log traversal of current timestamp directory for verbose mode
-
-        for product_dir_name in sorted(os.listdir(timestamp_dir_path)):  # Iterate product directories inside this timestamp directory in sorted order
-            product_dir_path = os.path.join(timestamp_dir_path, product_dir_name)  # Build full path to the current product directory
-
-            if not os.path.isdir(product_dir_path):  # Skip non-directory entries inside timestamp directory
-                continue  # Continue to next entry when not a directory
-
-            description_files = [  # Collect description files matching the expected naming convention
-                f for f in os.listdir(product_dir_path) if f.endswith("_description.txt")
-            ]  # Filter directory entries for files ending with _description.txt
-
-            if not description_files:  # Verify if at least one description file exists in this product directory
-                verbose_output(f"{BackgroundColors.YELLOW}No description file found in: {BackgroundColors.CYAN}{product_dir_name}{BackgroundColors.YELLOW}. Skipping.{Style.RESET_ALL}")  # Log missing description file for verbose mode
-                continue  # Continue to next product directory when no description file is present
-
-            template_file = os.path.join(product_dir_path, "Template.txt")  # Build expected Template.txt path for existence verification
-
-            if os.path.exists(template_file):  # Verify if Template.txt already exists for this product
-                verbose_output(f"{BackgroundColors.YELLOW}Template file already exists in: {BackgroundColors.CYAN}{product_dir_name}{BackgroundColors.YELLOW}. Skipping.{Style.RESET_ALL}")  # Log existing template file for verbose mode
-                continue  # Continue to next product directory when template already exists
-            product_dirs.append((product_dir_path, product_dir_name, description_files[0]))  # Collect tuple for tqdm iteration
-
-    total = len(product_dirs)  # Compute total number of valid products to process
-    
-    if total == 0:  # If no valid products to process
-        return  # Return early with no tqdm or further processing
-
-    pbar = tqdm(
-        product_dirs,
-        desc=f"{BackgroundColors.GREEN}Generating Templates{Style.RESET_ALL}",
-        unit="product",
-        ncols=100,
-        bar_format="{l_bar}{bar}| {n_fmt}/{total_fmt} [{elapsed}<{remaining}, {rate_fmt}]",
-        file=sys.__stdout__,
-    )  # Initialize tqdm progress bar for product directories
-
-    for idx, (product_dir_path, product_dir_name, description_file_name) in enumerate(pbar, 1):  # Iterate with tqdm and 1-based index
-        description_file = os.path.join(product_dir_path, description_file_name)  # Select the first description file as the authoritative source
-        
-        template_file = os.path.join(product_dir_path, "Template.txt")  # Build expected Template.txt path for existence verification
-        
-        pbar.set_description(f"{BackgroundColors.GREEN}Generating {BackgroundColors.CYAN}{idx}{BackgroundColors.GREEN}/{BackgroundColors.CYAN}{total}{BackgroundColors.GREEN} - {BackgroundColors.CYAN}{product_dir_name}{Style.RESET_ALL}")  # Update tqdm description with color and index
-        
-        if os.path.exists(template_file):  # Verify if Template.txt already exists for this product
-            verbose_output(f"{BackgroundColors.GREEN}[DEBUG] Template.txt already exists for: {BackgroundColors.CYAN}{product_dir_name}{BackgroundColors.GREEN}. Skipping generation.{Style.RESET_ALL}")  # Log skip when template is already present
-            continue  # Continue to next product directory when template already exists
-        
-        verbose_output(true_string=f"{BackgroundColors.GREEN}Generating Template.txt for: {BackgroundColors.CYAN}{product_dir_name}{Style.RESET_ALL}")  # Log template generation start for this product directory
-        
-        success = generate_and_validate_template_for_product(description_file, api_keys)  # Generate and validate Template.txt using the extracted reusable function
-        
-        if success:  # Verify if generation and validation succeeded
-            verbose_output(f"{BackgroundColors.GREEN}Successfully generated and validated Template.txt for: {BackgroundColors.CYAN}{product_dir_name}{Style.RESET_ALL}")  # Log successful generation and validation
-        else:  # If generation or validation failed
-            print(f"{BackgroundColors.RED}Failed to generate Template.txt for: {BackgroundColors.CYAN}{product_dir_name}{Style.RESET_ALL}")  # Log generation failure for this product
 
 
 def locate_existing_prompt_file(product_dir_path: str) -> Optional[str]:
@@ -1822,38 +997,6 @@ def generate_template_from_prompt_content(prompt_content: str, output_directory:
             gemini.close()  # Close Gemini client to release resources.
 
 
-def process_gemini_prompt_model_fallbacks(prompt_content: str, output_directory: str, owner: str, api_key: str, current_idx: int, total_keys: int) -> bool:
-    """
-    Execute deterministic Gemini model fallback attempts for prompt-based template generation.
-
-    :param prompt_content: Prompt text read from Prompt.txt file.
-    :param output_directory: Product output directory where Template.txt will be written.
-    :param owner: Owner name associated with the current API key.
-    :param api_key: Gemini API key used for generation attempts.
-    :param current_idx: Current zero-based API key index.
-    :param total_keys: Total available Gemini API keys.
-    :return: True if any model succeeds, otherwise False.
-    """
-
-    for model_index, model_name in enumerate(GEMINI_MODEL_PRIORITY, 1):  # Iterate model fallback list in fixed deterministic order.
-        success = generate_template_from_prompt_content(  # Execute single-key single-model Gemini generation attempt.
-            prompt_content,  # Reuse same prompt content for deterministic retry behavior.
-            output_directory,  # Reuse same output directory destination for deterministic retry behavior.
-            owner_name=owner,  # Pass owner name for enhanced logging.
-            api_key=api_key,  # Pass current key only and let caller-side logic handle rotations.
-            key_index=(current_idx + 1),  # Pass numeric one-based index for Gemini client and rotation logic.
-            total_keys=total_keys,  # Pass total key count for contextual logging.
-            model_name=model_name,  # Pass selected model name for deterministic fallback attempt.
-        )  # End single-key single-model generation call.
-
-        if success:  # Verify whether generation succeeded for this key/model combination.
-            return True  # Return success immediately after first successful fallback attempt.
-
-        if model_index < len(GEMINI_MODEL_PRIORITY):  # Verify if another fallback model is still available.
-            next_model_name = GEMINI_MODEL_PRIORITY[model_index]  # Resolve next model name using current loop position.
-            print(f"{BackgroundColors.YELLOW}[WARNING] Falling back model for key {BackgroundColors.CYAN}{owner}{BackgroundColors.YELLOW}: {BackgroundColors.CYAN}{model_name}{BackgroundColors.YELLOW} -> {BackgroundColors.CYAN}{next_model_name}{Style.RESET_ALL}")  # Report deterministic model fallback transition.
-
-    return False  # Return failure after exhausting all configured fallback models.
 
 
 def generate_and_validate_template_from_prompt_for_product(prompt_file: str, api_keys: Dict[str, str]) -> bool:
@@ -1914,69 +1057,8 @@ def process_template_generation_item(product_dir_path: str, product_dir_name: st
     return False  # Return failure.
 
 
-def generate_template_files_from_prompt(outputs_dir: str, api_keys: Dict[str, str]) -> None:
-    """
-    Traverse all product output directories and generate missing Template.txt files from Prompt.txt.
-
-    :param outputs_dir: Base outputs directory.
-    :param api_keys: Mapping of API keys.
-    :return: None
-    """
-
-    print(f"{BackgroundColors.GREEN}Running in {BackgroundColors.CYAN}Generate Template Files from Prompt{Style.RESET_ALL}")  # Log mode start.
-
-    if not os.path.isdir(outputs_dir):  # Verify directory exists.
-        print(f"{BackgroundColors.RED}Outputs directory not found: {BackgroundColors.CYAN}{outputs_dir}{Style.RESET_ALL}")  # Log error.
-        return  # Exit early.
-
-    product_dirs = collect_products_missing_templates(outputs_dir)  # Collect candidates.
-
-    total = len(product_dirs)  # Compute workload.
-
-    if total == 0:  # Verify empty workload.
-        return  # Exit early.
-
-    pbar = tqdm(
-        product_dirs,
-        desc=f"{BackgroundColors.GREEN}Generating Templates{Style.RESET_ALL}",
-        unit="product",
-        ncols=100,
-        bar_format="{l_bar}{bar}| {n_fmt}/{total_fmt} [{elapsed}<{remaining}, {rate_fmt}]",
-        file=sys.__stdout__,
-    )  # Initialize progress bar.
-
-    for idx, (product_dir_path, product_dir_name, prompt_file) in enumerate(pbar, 1):  # Iterate workload.
-        pbar.set_description(
-            f"{BackgroundColors.GREEN}Generating {BackgroundColors.CYAN}{idx}{BackgroundColors.GREEN}/{BackgroundColors.CYAN}{total}{BackgroundColors.GREEN} - {BackgroundColors.CYAN}{product_dir_name}{Style.RESET_ALL}"
-        )  # Update progress bar.
-
-        process_template_generation_item(product_dir_path, product_dir_name, prompt_file, api_keys)  # Execute processing step.
 
 
-def list_restructure_mode_target_directories(base_output_dir: str) -> List[str]:
-    """
-    List immediate eligible directories for standalone restructuring mode.
-
-    :param base_output_dir: Base output directory that contains run directories.
-    :return: Sorted list of absolute eligible directories excluding .staging case-insensitively.
-    """
-
-    target_directories: List[str] = []  # Initialize list for immediate eligible output directories.
-
-    if not os.path.isdir(base_output_dir):  # Verify base output directory exists before listing entries.
-        return target_directories  # Return empty list when output directory does not exist.
-
-    for entry_name in sorted(os.listdir(base_output_dir)):  # Iterate immediate child entries in deterministic sorted order.
-        if entry_name.lower() == ".staging":  # Ignore staging directory name regardless of letter casing.
-            continue  # Continue to next entry when current entry is staging.
-
-        entry_path = os.path.join(base_output_dir, entry_name)  # Build absolute path for current immediate child entry.
-        if not os.path.isdir(entry_path):  # Verify current entry is a directory.
-            continue  # Continue to next entry when current entry is not a directory.
-
-        target_directories.append(entry_path)  # Append eligible immediate child directory for standalone restructuring mode.
-
-    return target_directories  # Return collected eligible immediate directories.
 
 
 def setup_environment() -> bool:
@@ -2120,54 +1202,6 @@ def initialize_processing_context(staging_output_dir: str) -> dict:
     return context  # Return initialized processing context
 
 
-def handle_scraping(url: str, staging_output_dir: str, local_html_path, index: int, retry_attempt: int) -> tuple:
-    """
-    Execute product scraping and return scrape result with retry signal.
-
-    :param url: Product URL to scrape.
-    :param staging_output_dir: Path to the staging output directory.
-    :param local_html_path: Optional local HTML file path for offline mode.
-    :param index: Current URL index in the processing queue.
-    :param retry_attempt: Current retry attempt number.
-    :return: Tuple of (scrape_result, should_retry, should_break) controlling retry flow.
-    """
-
-    verbose_output(f"{BackgroundColors.GREEN}Step 1: {BackgroundColors.CYAN}Scraping the product information{Style.RESET_ALL}")  # Step 1: Scrape the product information
-    scrape_result = scrape_product(url, staging_output_dir, local_html_path)  # Scrape the product writing into staging
-
-    if not scrape_result or len(scrape_result) != 6:  # If scraping failed or returned invalid result
-        print(f"{BackgroundColors.RED}Skipping {BackgroundColors.CYAN}{url}{BackgroundColors.RED} due to scraping failure.{Style.RESET_ALL}\n")  # Notify user about skip
-        try:  # Attempt to clean any partial staging output for this URL
-            tmp_product_name = None  # Initialize temporary product name variable
-            if isinstance(scrape_result, tuple) and scrape_result[2]:  # Verify tuple shape and product dir field
-                tmp_product_name = scrape_result[2]  # Extract product directory name from scrape_result
-            if tmp_product_name:  # Only proceed if we found a temporary product directory name
-                tmp_path = os.path.join(staging_output_dir, tmp_product_name)  # Build staging path for that product
-                if os.path.exists(tmp_path):  # Verify if the staging path exists on disk
-                    force_remove_path(tmp_path)  # Remove the partial staging directory to keep staging clean using centralized deletion
-        except Exception:  # Catch and ignore any errors during staging cleanup
-            pass  # Ignore cleanup errors and continue
-
-        if retry_attempt < OUTPUT_DIRECTORY_RETRY_ATTEMPTS:  # Verify if another retry attempt is still allowed
-            print(f"{BackgroundColors.YELLOW}[WARNING] Output directory missing after processing URL index {index}. Retrying processing.{Style.RESET_ALL}")  # Warn and retry same URL position
-            return None, True, False  # Return retry signal
-
-        print(f"{BackgroundColors.YELLOW}[WARNING] Failed to generate output directory after retry for URL index {index}.{Style.RESET_ALL}")  # Report definitive failure after retry exhaustion
-        return None, False, True  # Return break signal
-
-    product_data = scrape_result[0]  # Extract product_data from scrape result for validation
-
-    if not product_data:  # If scraping failed unexpectedly  # Validate product_data presence
-        print(f"{BackgroundColors.RED}Skipping {BackgroundColors.CYAN}{url}{BackgroundColors.RED} due to scraping failure.{Style.RESET_ALL}\n")  # Inform about unexpected failure
-
-        if retry_attempt < OUTPUT_DIRECTORY_RETRY_ATTEMPTS:  # Verify if another retry attempt is still allowed
-            print(f"{BackgroundColors.YELLOW}[WARNING] Output directory missing after processing URL index {index}. Retrying processing.{Style.RESET_ALL}")  # Warn and retry same URL position
-            return None, True, False  # Return retry signal
-
-        print(f"{BackgroundColors.YELLOW}[WARNING] Failed to generate output directory after retry for URL index {index}.{Style.RESET_ALL}")  # Report definitive failure after retry exhaustion
-        return None, False, True  # Return break signal
-
-    return scrape_result, False, False  # Return successful scrape result with no retry or break signals
 
 
 def normalize_product_data_paths(product_data: dict) -> dict:
@@ -2283,7 +1317,6 @@ def process_single_url(url: str, index: int, context: dict, api_keys: dict) -> b
     Returns:
         bool: True if the product was successfully scraped and saved, False otherwise.
     """
-    verify_affiliate_url_format(url)
     
     # Simple single attempt scraping
     product_data = scrape_product(url, api_keys)
