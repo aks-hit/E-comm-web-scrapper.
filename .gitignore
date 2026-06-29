@@ -107,8 +107,9 @@ dmypy.json
 **/*.tar.gz
 
 # Data Directories (Input/Output/Results)
+
 **/Inputs/*
-**/Outputs/*
+
 
 # Data Files (keep only requirements.txt and README.md)
 **/*.csv
